@@ -33,7 +33,10 @@ def get_conn():
     if TURSO_URL and TURSO_TOKEN:
         # Use Turso cloud database (libsql SDK)
         try:
-            import libsql
+            try:
+                import libsql_experimental as libsql
+            except ImportError:
+                import libsql
             _conn = libsql.connect(
                 DATABASE_PATH,
                 sync_url=TURSO_URL,

@@ -2,17 +2,19 @@ from __future__ import annotations
 
 """
 Verichains LeadHunter — Database Layer
-Supports: Turso (cloud), local SQLite, Vercel /tmp SQLite.
+Supports: Turso HTTP API (cloud), local SQLite, Vercel /tmp SQLite.
 """
 
 import sqlite3
 import os
 import json
+import re
+import requests as http_requests
 from datetime import datetime, timezone
 
 # --- Connection config ---
-TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
-TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL", "")
+TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "")
 IS_VERCEL = os.environ.get("VERCEL")
 
 # On Vercel, filesystem is read-only except /tmp
@@ -21,56 +23,189 @@ if IS_VERCEL:
 else:
     DATABASE_PATH = os.path.join(os.path.dirname(__file__), "leads.db")
 
+
+# ============================
+#  Turso HTTP API Wrapper
+# ============================
+
+class TursoRow:
+    """Row that supports both dict-like and index access."""
+    def __init__(self, columns: list[str], values: list):
+        self._columns = columns
+        self._values = values
+        self._map = dict(zip(columns, values))
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return self._map[key]
+
+    def keys(self):
+        return self._columns
+
+    def __iter__(self):
+        return iter(self._values)
+
+
+class TursoCursor:
+    """Cursor-like object for Turso HTTP results."""
+    def __init__(self, columns: list[str], rows: list[list], lastrowid=None):
+        self._columns = columns
+        self._rows = [TursoRow(columns, r) for r in rows]
+        self._pos = 0
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        if self._pos < len(self._rows):
+            row = self._rows[self._pos]
+            self._pos += 1
+            return row
+        return None
+
+    def fetchall(self):
+        return self._rows[self._pos:]
+
+
+class TursoHTTPConnection:
+    """
+    sqlite3-compatible connection using Turso HTTP API.
+    Uses POST /v2/pipeline with Bearer token auth.
+    No native dependencies — pure Python + requests.
+    """
+
+    def __init__(self, url: str, token: str):
+        # Convert libsql:// to https://
+        self.base_url = url.replace("libsql://", "https://")
+        self.pipeline_url = f"{self.base_url}/v2/pipeline"
+        self.token = token
+        self.row_factory = None  # Compatibility with sqlite3
+        print(f"[DB] ✅ Connected to Turso cloud: {self.base_url[:50]}...")
+
+    def _send(self, statements: list[dict]) -> list[dict]:
+        """Send a pipeline of statements to Turso."""
+        payload = {"requests": statements + [{"type": "close"}]}
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+        }
+        resp = http_requests.post(self.pipeline_url, json=payload, headers=headers, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("results", [])
+
+    def _convert_value(self, val):
+        """Convert Turso response value to Python type."""
+        if val is None:
+            return None
+        if isinstance(val, dict):
+            t = val.get("type")
+            v = val.get("value")
+            if t == "null" or v is None:
+                return None
+            if t == "integer":
+                return int(v)
+            if t == "float":
+                return float(v)
+            if t == "text":
+                return str(v)
+            return v
+        return val
+
+    def _make_arg(self, val):
+        """Convert Python value to Turso API arg format."""
+        if val is None:
+            return {"type": "null", "value": None}
+        if isinstance(val, int):
+            return {"type": "integer", "value": str(val)}
+        if isinstance(val, float):
+            return {"type": "float", "value": str(val)}
+        return {"type": "text", "value": str(val)}
+
+    def execute(self, sql: str, params=None) -> TursoCursor:
+        """Execute a single SQL statement."""
+        stmt = {"sql": sql.strip()}
+        if params:
+            stmt["args"] = [self._make_arg(p) for p in params]
+
+        results = self._send([{"type": "execute", "stmt": stmt}])
+
+        columns = []
+        rows = []
+        lastrowid = None
+
+        if results and results[0].get("type") == "ok":
+            result = results[0]["response"]["result"]
+            columns = [c["name"] for c in result.get("cols", [])]
+            rows = [
+                [self._convert_value(v) for v in row]
+                for row in result.get("rows", [])
+            ]
+            rid = result.get("last_insert_rowid")
+            if rid:
+                lastrowid = int(rid) if isinstance(rid, str) else rid
+        elif results and results[0].get("type") == "error":
+            err = results[0].get("error", {})
+            msg = err.get("message", "Unknown Turso error")
+            print(f"[DB] ❌ Turso error: {msg}")
+
+        return TursoCursor(columns, rows, lastrowid)
+
+    def executescript(self, script: str):
+        """Execute multiple SQL statements (for CREATE TABLE etc)."""
+        # Split by semicolons, filter empty
+        statements = []
+        for stmt in script.split(";"):
+            stmt = stmt.strip()
+            if stmt and not stmt.startswith("--"):
+                statements.append({
+                    "type": "execute",
+                    "stmt": {"sql": stmt}
+                })
+
+        if statements:
+            try:
+                self._send(statements)
+            except Exception as e:
+                print(f"[DB] ⚠️  executescript partial error: {e}")
+
+    def commit(self):
+        """No-op — Turso auto-commits."""
+        pass
+
+    def close(self):
+        """No-op."""
+        pass
+
+
+# ============================
+#  Connection Factory
+# ============================
+
 _conn = None
 
 
 def get_conn():
-    """Get or create database connection. Supports Turso cloud or local SQLite."""
+    """Get or create database connection. Turso HTTP or local SQLite."""
     global _conn
     if _conn is not None:
         return _conn
 
     if TURSO_URL and TURSO_TOKEN:
-        # Use Turso cloud database (libsql SDK)
         try:
-            try:
-                import libsql_experimental as libsql
-            except ImportError:
-                import libsql
-            _conn = libsql.connect(
-                DATABASE_PATH,
-                sync_url=TURSO_URL,
-                auth_token=TURSO_TOKEN,
-            )
-            _conn.sync()
-            print(f"[DB] ✅ Connected to Turso cloud: {TURSO_URL[:40]}...")
-        except ImportError:
-            print("[DB] ⚠️  libsql not installed, falling back to local SQLite")
-            _conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+            _conn = TursoHTTPConnection(TURSO_URL, TURSO_TOKEN)
+            init_tables(_conn)
+            print("[DB] ✅ Turso tables initialized")
+            return _conn
         except Exception as e:
             print(f"[DB] ⚠️  Turso connection failed: {e}, falling back to local SQLite")
-            _conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-    else:
-        # Local SQLite
-        _conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-        print(f"[DB] 📁 Using local SQLite: {DATABASE_PATH}")
 
+    # Local SQLite fallback
+    _conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     _conn.row_factory = sqlite3.Row
-    try:
-        _conn.execute("PRAGMA journal_mode=WAL")
-        _conn.execute("PRAGMA foreign_keys=ON")
-    except Exception:
-        pass  # Some Turso configs don't support PRAGMA
-
+    _conn.execute("PRAGMA journal_mode=WAL")
+    _conn.execute("PRAGMA foreign_keys=ON")
     init_tables(_conn)
-
-    # Sync after creating tables (Turso)
-    if TURSO_URL and TURSO_TOKEN:
-        try:
-            _conn.sync()
-        except Exception:
-            pass
-
+    print(f"[DB] 📁 Using local SQLite: {DATABASE_PATH}")
     return _conn
 
 

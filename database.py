@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 """
-Verichains LeadHunter — SQLite Database Layer
-Replaces Airtable with local SQLite. Zero-config, zero-cost.
+Verichains LeadHunter — Database Layer
+Supports: Turso (cloud), local SQLite, Vercel /tmp SQLite.
 """
 
 import sqlite3
@@ -10,8 +10,13 @@ import os
 import json
 from datetime import datetime, timezone
 
+# --- Connection config ---
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
+TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+IS_VERCEL = os.environ.get("VERCEL")
+
 # On Vercel, filesystem is read-only except /tmp
-if os.environ.get("VERCEL"):
+if IS_VERCEL:
     DATABASE_PATH = "/tmp/leads.db"
 else:
     DATABASE_PATH = os.path.join(os.path.dirname(__file__), "leads.db")
@@ -19,15 +24,50 @@ else:
 _conn = None
 
 
-def get_conn() -> sqlite3.Connection:
-    """Get or create database connection."""
+def get_conn():
+    """Get or create database connection. Supports Turso cloud or local SQLite."""
     global _conn
-    if _conn is None:
+    if _conn is not None:
+        return _conn
+
+    if TURSO_URL and TURSO_TOKEN:
+        # Use Turso cloud database (libsql SDK)
+        try:
+            import libsql
+            _conn = libsql.connect(
+                DATABASE_PATH,
+                sync_url=TURSO_URL,
+                auth_token=TURSO_TOKEN,
+            )
+            _conn.sync()
+            print(f"[DB] ✅ Connected to Turso cloud: {TURSO_URL[:40]}...")
+        except ImportError:
+            print("[DB] ⚠️  libsql not installed, falling back to local SQLite")
+            _conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+        except Exception as e:
+            print(f"[DB] ⚠️  Turso connection failed: {e}, falling back to local SQLite")
+            _conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    else:
+        # Local SQLite
         _conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-        _conn.row_factory = sqlite3.Row
+        print(f"[DB] 📁 Using local SQLite: {DATABASE_PATH}")
+
+    _conn.row_factory = sqlite3.Row
+    try:
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.execute("PRAGMA foreign_keys=ON")
-        init_tables(_conn)
+    except Exception:
+        pass  # Some Turso configs don't support PRAGMA
+
+    init_tables(_conn)
+
+    # Sync after creating tables (Turso)
+    if TURSO_URL and TURSO_TOKEN:
+        try:
+            _conn.sync()
+        except Exception:
+            pass
+
     return _conn
 
 

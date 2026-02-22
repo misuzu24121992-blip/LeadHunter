@@ -1,0 +1,29 @@
+# Environment & secrets
+.env
+*.env.local
+
+# Database
+leads.db
+leads.db-wal
+leads.db-shm
+leads.db-journal
+
+# State files
+.watcher_state.json
+.incident_state.json
+watchlist.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

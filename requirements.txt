@@ -1,0 +1,19 @@
+# Core
+requests>=2.31.0
+openai>=1.12.0
+anthropic>=0.40.0
+google-genai>=1.0.0
+python-dotenv>=1.0.0
+
+# Airtable (legacy, optional)
+pyairtable>=2.2.0
+
+# Web Server
+fastapi>=0.109.0
+uvicorn>=0.27.0
+
+# Scheduling
+apscheduler>=3.10.0
+
+# RSS parsing (for incident_radar)
+feedparser>=6.0.0

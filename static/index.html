@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LeadHunter — Verichains</title>
+    <meta name="description" content="Signal-based Lead Generation for Blockchain Security">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+
+<body>
+    <!-- Sidebar -->
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">🔍</div>
+            <div>
+                <h1 class="brand-title">LeadHunter</h1>
+                <span class="brand-subtitle">Verichains</span>
+            </div>
+        </div>
+
+        <div class="nav-items">
+            <button class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">
+                <span class="nav-icon">📊</span>
+                <span>Dashboard</span>
+            </button>
+            <button class="nav-item" data-tab="pipeline" onclick="switchTab('pipeline')">
+                <span class="nav-icon">📋</span>
+                <span>Pipeline</span>
+            </button>
+            <button class="nav-item" data-tab="watchlist" onclick="switchTab('watchlist')">
+                <span class="nav-icon">👁️</span>
+                <span>Watchlist</span>
+            </button>
+            <button class="nav-item" data-tab="incidents" onclick="switchTab('incidents')">
+                <span class="nav-icon">🚨</span>
+                <span>Incidents</span>
+            </button>
+            <button class="nav-item" data-tab="scans" onclick="switchTab('scans')">
+                <span class="nav-icon">⚡</span>
+                <span>Scans</span>
+            </button>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="scan-status" id="scan-status">
+                <div class="status-dot status-idle"></div>
+                <span>System Idle</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Dashboard Tab -->
+        <section class="tab-content active" id="tab-dashboard">
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title">Dashboard</h2>
+                    <p class="page-subtitle">Lead generation overview</p>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-primary btn-glow" onclick="runScan('leads')">
+                        <span class="btn-icon">🚀</span> Run Lead Scan
+                    </button>
+                </div>
+            </div>
+
+            <div class="stats-grid" id="stats-grid">
+                <div class="stat-card stat-hot">
+                    <div class="stat-value" id="stat-hot">0</div>
+                    <div class="stat-label">🔴 HOT Leads</div>
+                    <div class="stat-glow"></div>
+                </div>
+                <div class="stat-card stat-warm">
+                    <div class="stat-value" id="stat-warm">0</div>
+                    <div class="stat-label">🟡 WARM Leads</div>
+                </div>
+                <div class="stat-card stat-monitor">
+                    <div class="stat-value" id="stat-monitor">0</div>
+                    <div class="stat-label">🟢 MONITOR</div>
+                </div>
+                <div class="stat-card stat-total">
+                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="stat-label">📋 Total Leads</div>
+                </div>
+                <div class="stat-card stat-watchlist">
+                    <div class="stat-value" id="stat-watchlist">0</div>
+                    <div class="stat-label">👁️ Watching</div>
+                </div>
+                <div class="stat-card stat-incidents">
+                    <div class="stat-value" id="stat-incidents">0</div>
+                    <div class="stat-label">🚨 Incidents</div>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h3 class="card-title">🔥 Hot Leads</h3>
+                    <div id="hot-leads-list" class="leads-mini-list"></div>
+                </div>
+                <div class="card">
+                    <h3 class="card-title">📊 Category Distribution</h3>
+                    <div id="category-chart" class="chart-container"></div>
+                </div>
+                <div class="card">
+                    <h3 class="card-title">⚡ Recent Scans</h3>
+                    <div id="recent-scans" class="scan-list"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pipeline Tab -->
+        <section class="tab-content" id="tab-pipeline">
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title">Pipeline</h2>
+                    <p class="page-subtitle">Manage your leads through stages</p>
+                </div>
+                <div class="header-actions">
+                    <input type="text" class="search-input" placeholder="Search leads..." id="pipeline-search"
+                        oninput="filterPipeline()">
+                    <select class="filter-select" id="pipeline-filter-priority" onchange="filterPipeline()">
+                        <option value="">All Priorities</option>
+                        <option value="HOT">🔴 HOT</option>
+                        <option value="WARM">🟡 WARM</option>
+                        <option value="MONITOR">🟢 MONITOR</option>
+                        <option value="LOW">⚪ LOW</option>
+                    </select>
+                    <select class="filter-select" id="pipeline-filter-category" onchange="filterPipeline()">
+                        <option value="">All Categories</option>
+                        <option value="DeFi">DeFi</option>
+                        <option value="GameFi">GameFi</option>
+                        <option value="RWA">RWA</option>
+                        <option value="ZK">ZK</option>
+                        <option value="L1-L2">L1-L2</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="pipeline-board" id="pipeline-board">
+                <div class="pipeline-column" data-stage="Discovered">
+                    <div class="column-header">
+                        <span class="column-dot discovered"></span>
+                        <span>Discovered</span>
+                        <span class="column-count" id="count-Discovered">0</span>
+                    </div>
+                    <div class="column-cards" id="col-Discovered"></div>
+                </div>
+                <div class="pipeline-column" data-stage="Researching">
+                    <div class="column-header">
+                        <span class="column-dot researching"></span>
+                        <span>Researching</span>
+                        <span class="column-count" id="count-Researching">0</span>
+                    </div>
+                    <div class="column-cards" id="col-Researching"></div>
+                </div>
+                <div class="pipeline-column" data-stage="Outreach">
+                    <div class="column-header">
+                        <span class="column-dot outreach"></span>
+                        <span>Outreach</span>
+                        <span class="column-count" id="count-Outreach">0</span>
+                    </div>
+                    <div class="column-cards" id="col-Outreach"></div>
+                </div>
+                <div class="pipeline-column" data-stage="Proposal">
+                    <div class="column-header">
+                        <span class="column-dot proposal"></span>
+                        <span>Proposal</span>
+                        <span class="column-count" id="count-Proposal">0</span>
+                    </div>
+                    <div class="column-cards" id="col-Proposal"></div>
+                </div>
+                <div class="pipeline-column" data-stage="Won">
+                    <div class="column-header">
+                        <span class="column-dot won"></span>
+                        <span>Won</span>
+                        <span class="column-count" id="count-Won">0</span>
+                    </div>
+                    <div class="column-cards" id="col-Won"></div>
+                </div>
+                <div class="pipeline-column" data-stage="Lost">
+                    <div class="column-header">
+                        <span class="column-dot lost"></span>
+                        <span>Lost</span>
+                        <span class="column-count" id="count-Lost">0</span>
+                    </div>
+                    <div class="column-cards" id="col-Lost"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Watchlist Tab -->
+        <section class="tab-content" id="tab-watchlist">
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title">Watchlist</h2>
+                    <p class="page-subtitle">Target projects to monitor for upgrades</p>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-primary" onclick="showAddWatchlistModal()">
+                        <span class="btn-icon">+</span> Add Project
+                    </button>
+                    <button class="btn btn-secondary" onclick="runScan('upgrades')">
+                        <span class="btn-icon">🔍</span> Scan Upgrades
+                    </button>
+                </div>
+            </div>
+            <div class="table-container">
+                <table class="data-table" id="watchlist-table">
+                    <thead>
+                        <tr>
+                            <th>Project</th>
+                            <th>Category</th>
+                            <th>GitHub</th>
+                            <th>Snapshot</th>
+                            <th>Client Type</th>
+                            <th>Last Audit</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="watchlist-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Incidents Tab -->
+        <section class="tab-content" id="tab-incidents">
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title">Incidents</h2>
+                    <p class="page-subtitle">Security incidents & FUD-driven opportunities</p>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-danger" onclick="runScan('incidents')">
+                        <span class="btn-icon">🚨</span> Scan Incidents
+                    </button>
+                </div>
+            </div>
+            <div id="incidents-list" class="incidents-grid"></div>
+        </section>
+
+        <!-- Scans Tab -->
+        <section class="tab-content" id="tab-scans">
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title">Scan Center</h2>
+                    <p class="page-subtitle">Run and monitor data collection scans</p>
+                </div>
+            </div>
+
+            <div class="scan-actions-grid">
+                <div class="scan-action-card" onclick="runScan('leads')">
+                    <div class="scan-action-icon">📡</div>
+                    <h3>Lead Scan</h3>
+                    <p>DeFiLlama + RootData</p>
+                    <button class="btn btn-primary btn-sm">Run Now</button>
+                </div>
+                <div class="scan-action-card" onclick="runScan('upgrades')">
+                    <div class="scan-action-icon">🔍</div>
+                    <h3>Upgrade Scan</h3>
+                    <p>GitHub + Snapshot</p>
+                    <button class="btn btn-secondary btn-sm">Run Now</button>
+                </div>
+                <div class="scan-action-card" onclick="runScan('incidents')">
+                    <div class="scan-action-icon">🚨</div>
+                    <h3>Incident Scan</h3>
+                    <p>Rekt News + Alerts</p>
+                    <button class="btn btn-danger btn-sm">Run Now</button>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 2rem;">
+                <h3 class="card-title">📜 Scan History</h3>
+                <div id="scan-logs-list" class="scan-logs"></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="modal-title">Add Project</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="/static/app.js?v=2"></script>
+</body>
+
+</html>

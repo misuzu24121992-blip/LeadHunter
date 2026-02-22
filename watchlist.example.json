@@ -1,0 +1,35 @@
+[
+    {
+        "name": "Uniswap",
+        "github_repo": "https://github.com/Uniswap/v4-core",
+        "snapshot_space": "uniswapgovernance.eth",
+        "x_account": "@Uniswap",
+        "category": "DeFi",
+        "last_audit_date": "2024-06-01",
+        "auditor": "OpenZeppelin",
+        "client_type": "Mid-cap",
+        "notes": "V4 hooks system - complex"
+    },
+    {
+        "name": "Aave",
+        "github_repo": "https://github.com/aave/aave-v3-core",
+        "snapshot_space": "aave.eth",
+        "x_account": "@aabornyakov",
+        "category": "DeFi",
+        "last_audit_date": "2024-01-01",
+        "auditor": "Trail of Bits",
+        "client_type": "Mid-cap",
+        "notes": "Lending protocol"
+    },
+    {
+        "name": "ExampleClient",
+        "github_repo": "https://github.com/example/protocol",
+        "snapshot_space": "",
+        "x_account": "@example",
+        "category": "DeFi",
+        "last_audit_date": "2025-06-01",
+        "auditor": "Verichains",
+        "client_type": "Khách cũ",
+        "notes": "Our existing client - watch for updates"
+    }
+]

@@ -10,7 +10,11 @@ import os
 import json
 from datetime import datetime, timezone
 
-DATABASE_PATH = os.path.join(os.path.dirname(__file__), "leads.db")
+# On Vercel, filesystem is read-only except /tmp
+if os.environ.get("VERCEL"):
+    DATABASE_PATH = "/tmp/leads.db"
+else:
+    DATABASE_PATH = os.path.join(os.path.dirname(__file__), "leads.db")
 
 _conn = None
 

@@ -29,7 +29,17 @@ for l in d['leads']:
 
 Run these 5 checks **in order** for every lead. Stop early if a definitive answer is found.
 
-#### Step 2a — GitHub Audit Folder Check
+#### Step 2a — DeFiLlama Detail API Check
+Fetch the protocol detail API to get audit data:
+```
+curl -s https://api.llama.fi/protocol/{slug}
+```
+Check the `audits` field (`"0"` = none, `"2"` = audited) and `audit_links` array.
+This is the **fastest, most reliable** check — catches audits like Paimon (CertiK).
+
+**Example**: Paimon → `audits: "2"`, `audit_links: ["github.com/.../audit-report-2026-01.pdf"]` → ✅ Found
+
+#### Step 2a-bis — GitHub Audit Folder Check
 If the lead has a `github_url`, use `read_url_content` to check:
 ```
 {github_url}/tree/main/audits
@@ -40,12 +50,16 @@ Look for PDF audit reports, auditor names, and dates.
 
 **Example**: atomiq exchange → `github.com/atomiqlabs/atomiq-readme/tree/main/audits` → ✅ Found
 
-#### Step 2b — Web Search (Smart Contract Audit)
-Use `search_web` tool with these queries:
+#### Step 2b — Web Search (Audit Report)
+Use `search_web` tool with these queries **in this order**:
 ```
+"{project name}" audit report
 "{project name}" smart contract audit report
 "{project name}" security audit blockchain
 ```
+> [!IMPORTANT]
+> The simple query `"{name}" audit report` is often sufficient and finds results that more complex queries miss (e.g. Tramplin → MixBytes report). **Always try it first.**
+
 Look for: auditor name, report date, report link, severity findings.
 
 #### Step 2c — Audit Database Check
@@ -55,6 +69,10 @@ site:skynet.certik.com "{project name}"
 site:solodit.xyz "{project name}"
 site:defisafety.com "{project name}"
 site:app.sherlock.xyz "{project name}"
+```
+Also try direct CertiK Skynet URL:
+```
+https://skynet.certik.com/projects/{project-name-slug}
 ```
 
 #### Step 2d — Project Docs Crawl

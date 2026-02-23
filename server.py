@@ -113,6 +113,9 @@ def _heuristic_score(protocol: dict) -> dict:
     github_list = protocol.get("github") or []
     github_url = github_list[0] if isinstance(github_list, list) and github_list else (github_list if isinstance(github_list, str) else "")
 
+    # Classify audit status from DeFiLlama data
+    audit_status = _classify_audit(protocol)
+
     return {
         "name": name,
         "category": protocol.get("category") or "Other",
@@ -123,7 +126,7 @@ def _heuristic_score(protocol: dict) -> dict:
         "summary": f"New protocol on DeFiLlama. {protocol.get('description') or 'No description.'}",
         "funding": f"TVL: ${tvl:,.0f}",
         "tech": ", ".join((protocol.get("chains") or [])[:3]) or "Unknown chain",
-        "audit_status": "Unknown — needs review",
+        "audit_status": audit_status,
         "pitch_services": ["Smart Contract Audit"],
         "score_breakdown": breakdown,
         "scored_by": "heuristic",
@@ -136,6 +139,21 @@ def _heuristic_score(protocol: dict) -> dict:
     }
 
 
+def _classify_audit(protocol: dict) -> str:
+    """Classify audit status from DeFiLlama audits + audit_links fields."""
+    audits = protocol.get("audits") or "0"
+    audit_links = protocol.get("audit_links") or []
+
+    if audits != "0" and audit_links:
+        links_str = ", ".join(audit_links[:3])
+        return f"✅ DeFiLlama reports {len(audit_links)} audit(s): {links_str}"
+    elif audits != "0":
+        return "✅ DeFiLlama reports audit exists (no links available)"
+    else:
+        return "Unknown — needs review"
+
+
+
 def _run_lead_scan():
     """Run lead_hunter scan with heuristic scoring only.
     After scan, run /score-leads for Antigravity deep analysis + audit verification."""
@@ -146,6 +164,9 @@ def _run_lead_scan():
     try:
         existing = db.get_lead_names()
         protocols = lead_hunter.fetch_defillama_new_protocols()
+
+        # Enrich with audit data from DeFiLlama detail API
+        protocols = lead_hunter.enrich_audit_from_defillama(protocols)
 
         # Heuristic scoring — fast ingest, no API needed
         scored = []

@@ -69,10 +69,45 @@ def fetch_defillama_new_protocols(days_back: int = None) -> list[dict]:
                 "description": p.get("description") or "",
                 "slug": p.get("slug") or "",
                 "forked_from": p.get("forkedFrom") or [],
+                "audits": p.get("audits") or "0",
+                "audit_links": p.get("audit_links") or [],
             })
 
     print(f"[DeFiLlama] ✅ Found {len(new_protocols)} new protocols")
     return new_protocols
+
+
+def enrich_audit_from_defillama(protocols: list[dict]) -> list[dict]:
+    """
+    For protocols missing audit data, fetch DeFiLlama detail API.
+    The detail endpoint (api.llama.fi/protocol/{slug}) reliably contains
+    audits + audit_links even when the bulk /protocols endpoint doesn't.
+    """
+    enriched = 0
+    for p in protocols:
+        # Skip if already has audit data from bulk API
+        if p.get("audits", "0") != "0" and p.get("audit_links"):
+            continue
+        slug = p.get("slug")
+        if not slug:
+            continue
+        try:
+            resp = requests.get(f"{config.DEFILLAMA_API_BASE}/protocol/{slug}", timeout=10)
+            resp.raise_for_status()
+            detail = resp.json()
+            audits = detail.get("audits") or "0"
+            audit_links = detail.get("audit_links") or []
+            if audits != "0" or audit_links:
+                p["audits"] = audits
+                p["audit_links"] = audit_links
+                enriched += 1
+                print(f"  [Audit] ✅ {p['name']}: {len(audit_links)} audit link(s) from DeFiLlama detail API")
+            time.sleep(0.3)  # Rate limit
+        except Exception:
+            pass  # Non-critical, skip on failure
+    if enriched:
+        print(f"[DeFiLlama] 🔍 Enriched {enriched} protocols with audit data from detail API")
+    return protocols
 
 
 def format_defillama_for_scoring(protocol: dict) -> str:
@@ -85,6 +120,16 @@ def format_defillama_for_scoring(protocol: dict) -> str:
     tvl = protocol.get("tvl") or 0
     change_1d = protocol.get("change_1d") or 0
     change_7d = protocol.get("change_7d") or 0
+
+    # Audit info from DeFiLlama
+    audits = protocol.get("audits", "0")
+    audit_links = protocol.get("audit_links", [])
+    if audits != "0" and audit_links:
+        audit_str = f"Yes ({len(audit_links)} report(s)): " + ", ".join(audit_links[:3])
+    elif audits != "0":
+        audit_str = "Yes (DeFiLlama reports audit exists)"
+    else:
+        audit_str = "No audit data on DeFiLlama"
 
     return f"""
 Project: {protocol.get('name', 'Unknown')}
@@ -99,6 +144,7 @@ Twitter: {protocol.get('twitter') or 'N/A'}
 GitHub: {protocol.get('github') or 'N/A'}
 Description: {protocol.get('description') or 'N/A'}
 Forked From: {forked if forked else 'Original / Unknown'}
+Audit Status: {audit_str}
 """.strip()
 
 
@@ -267,6 +313,9 @@ def run_defillama(existing_names: list[str]) -> list[dict]:
     protocols = fetch_defillama_new_protocols()
     if not protocols:
         return []
+
+    # Enrich with audit data from DeFiLlama detail API
+    protocols = enrich_audit_from_defillama(protocols)
 
     # Format for scoring
     raw_leads = [format_defillama_for_scoring(p) for p in protocols]

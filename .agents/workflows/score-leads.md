@@ -1,11 +1,11 @@
 ---
-description: Score leads with Antigravity AI — includes web search for audit verification
+description: Score leads with Antigravity AI — includes 5-step audit verification pipeline
 ---
 
 # /score-leads Workflow
 
-This workflow scores unscored leads using Antigravity AI analysis with web-based audit verification.
-Run daily or on-demand after a DeFiLlama scan (`/api/run-scan/leads`).
+Score unscored leads using Antigravity AI with comprehensive audit verification.
+Run daily or on-demand after a DeFiLlama scan.
 
 ## Prerequisites
 - Leads must exist in the pipeline (run a scan first if empty)
@@ -25,63 +25,96 @@ for l in d['leads']:
 "
 ```
 
-### 2. Web Search Audit Status (for EACH unscored lead)
-For every lead from step 1, use the `search_web` tool to check:
+### 2. Audit Verification Pipeline (for EACH unscored lead)
+
+Run these 5 checks **in order** for every lead. Stop early if a definitive answer is found.
+
+#### Step 2a — GitHub Audit Folder Check
+If the lead has a `github_url`, use `read_url_content` to check:
 ```
-Query: "{project name}" smart contract audit report security review
+{github_url}/tree/main/audits
+{github_url}/tree/main/audit
+{github_url}/tree/main/security
+```
+Look for PDF audit reports, auditor names, and dates.
+
+**Example**: atomiq exchange → `github.com/atomiqlabs/atomiq-readme/tree/main/audits` → ✅ Found
+
+#### Step 2b — Web Search (Smart Contract Audit)
+Use `search_web` tool with these queries:
+```
+"{project name}" smart contract audit report
+"{project name}" security audit blockchain
+```
+Look for: auditor name, report date, report link, severity findings.
+
+#### Step 2c — Audit Database Check
+Use `search_web` with site-specific queries:
+```
+site:skynet.certik.com "{project name}"
+site:solodit.xyz "{project name}"
+site:defisafety.com "{project name}"
+site:app.sherlock.xyz "{project name}"
 ```
 
-Classify the result:
-- ✅ **Audited** → note auditor name, date, link to report
-- ⚠️ **Partially audited** → older audit, or only V1 audited
-- ❌ **No audit found** → high priority target
-
-Also search for:
+#### Step 2d — Project Docs Crawl
+If the lead has a `website_url`, use `read_url_content` to check:
 ```
-Query: "{project name}" fundraise seed round team
+{website_url}/security
+{website_url}/audits
+{website_url}/docs/security
 ```
-To gather funding/team context for scoring.
+Many protocols list their audits on a dedicated security page.
 
-### 3. Score Each Lead
-Using all gathered context (DeFiLlama data + web search results), assign scores using the Verichains rubric:
+**Example**: Cooler Loans → `docs.olympusdao.finance/main/security/audits` → ✅ 3 audits listed
 
-| Dimension | Max Points | What to evaluate |
-|-----------|-----------|-----------------|
-| Audit Need | 25 | Is there a public audit? How old? How complex? |
-| Funding & Budget | 15 | TVL, known fundraise, team backing |
-| Category Fit | 15 | DeFi/bridge/ZK = high, generic = low |
-| Growth & Timing | 10 | New launch? V2 upgrade? Rapid TVL growth? |
-| Verichains Moat | 5 | ZK, cryptography, novel primitives? |
-| Base Score | 30 | Overall impression |
+#### Step 2e — Classify Audit Status
+Based on all gathered data, classify:
+- ✅ **Audited** → `"✅ Audited by {auditor} ({date}) — {link}"` — reduce Audit Need score
+- ⚠️ **Stale audit** → `"⚠️ Last audit: {date} by {auditor}. Re-audit recommended."` — moderate score
+- ❌ **No audit found** → `"❌ No known public audit"` — high Audit Need score
+- 🚫 **Not applicable** → `"N/A — not a smart contract protocol"` (e.g. EXOD = tokenized stock)
 
-Priority mapping:
-- ≥75 → HOT
-- ≥55 → WARM
-- ≥40 → MONITOR
-- <40 → LOW
+### 3. Funding & Team Research
+Use `search_web` for each lead:
+```
+"{project name}" fundraise seed round investors
+"{project name}" team founders blockchain
+```
+Note: funding info affects budget score (can they afford an audit?).
 
-Lead Group:
-- A = Net-New (never been Verichains client)
-- B = Upgrade (existing project, re-audit opportunity)
-- C = Incident Response
-- D = Compliance
+### 4. Score Each Lead
+Using DeFiLlama data + audit verification + funding research, assign scores:
 
-### 4. Push Scores to API
+| Dimension | Max | Guide |
+|-----------|-----|-------|
+| Audit Need | 25 | ❌ No audit = 20-25, ⚠️ Stale = 10-15, ✅ Recent = 2-8 |
+| Funding & Budget | 15 | $50M+ TVL = 12-15, $1M+ = 8-11, <$100K = 1-4 |
+| Category Fit | 15 | Bridge/lending/DEX = 12-15, gaming/NFT = 5-8 |
+| Growth & Timing | 10 | V2 just launched = 8-10, mature = 2-4 |
+| Verichains Moat | 5 | ZK/crypto = 4-5, standard = 1-2 |
+| Base Score | 30 | Overall impression of opportunity quality |
+
+Priority: ≥75 HOT, ≥55 WARM, ≥40 MONITOR, <40 LOW
+
+Lead Group: A=Net-New, B=Upgrade, C=Incident, D=Compliance
+
+### 5. Push Scores to API
 ```
 curl -s -X POST https://leadhunter-nine.vercel.app/api/leads/bulk-score \
   -H "Content-Type: application/json" \
   -d '{"scores": [
     {"id": <ID>, "score": <N>, "priority": "<P>", "lead_group": "<G>",
-     "summary": "<AI summary with audit context>",
-     "audit_status": "<status with link to report>",
-     "score_breakdown": {<dimension breakdown>},
-     "pitch_services": ["<relevant services>"],
-     "funding": "<funding info>", "tech": "<tech stack>",
+     "summary": "<include audit context from step 2>",
+     "audit_status": "<classified status with link>",
+     "score_breakdown": {<6 dimensions>},
+     "pitch_services": ["<relevant>"],
+     "funding": "<info>", "tech": "<stack>",
      "scored_by": "ai:antigravity"}
   ]}'
 ```
 
-### 5. Verify
+### 6. Verify
 // turbo
 ```
 curl -s https://leadhunter-nine.vercel.app/api/leads/unscored | python3 -c "
@@ -89,8 +122,14 @@ import sys, json; print(f'Remaining unscored: {json.load(sys.stdin)[\"count\"]}'
 "
 ```
 
+### 7. Notify User for Manual Confirmation
+After scoring, present a summary table to the user for review.
+User may override scores based on their domain knowledge (Step 5 of the audit pipeline).
+This is critical — AI may miss context that only a human expert knows.
+
 ## Key Rules
-- **ALWAYS web search before scoring** — DeFiLlama alone is insufficient
-- Include audit report links in `audit_status` field when found
-- Mark tokenized stocks/non-protocols as LOW with clear explanation
-- For already-audited projects: reduce Audit Need points, note auditor + date
+- **NEVER skip audit verification** — DeFiLlama alone is insufficient
+- **Include audit report links** in `audit_status` when found
+- **Flag non-protocols** (tokenized stocks, wrapped tokens) as LOW
+- **Already-audited = lower score** unless stale (>1 year) or major upgrade
+- **Cross-chain bridges and novel primitives** deserve higher Verichains Moat scores

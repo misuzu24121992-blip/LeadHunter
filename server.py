@@ -187,20 +187,23 @@ def _run_upgrade_scan():
 
     log_id = db.start_scan_log("upgrade_watcher")
     try:
-        watchlist = db.get_watchlist()
-        if not watchlist:
+        watchlist_rows = db.get_watchlist()
+        if not watchlist_rows:
             db.complete_scan_log(log_id, 0, 0, 0, "No projects in watchlist")
             return {"changes": 0}
 
-        state = upgrade_watcher.load_state()
-        changes = upgrade_watcher.run_github_monitor(watchlist, state)
-        snapshot = upgrade_watcher.check_snapshot_proposals(watchlist, state)
-        changes.extend(snapshot)
-        meaningful = upgrade_watcher.process_changes(changes)
-        upgrade_watcher.save_state(state)
+        # Convert DB rows to dicts
+        watchlist = [dict(r) if hasattr(r, 'keys') else r for r in watchlist_rows]
+        result = upgrade_watcher.run_scan(watchlist, db_module=db)
 
-        db.complete_scan_log(log_id, len(meaningful), 0, 0, f"Raw: {len(changes)}, Meaningful: {len(meaningful)}")
-        return {"raw_changes": len(changes), "meaningful": len(meaningful)}
+        db.complete_scan_log(
+            log_id,
+            result.get("meaningful", 0),
+            result.get("leads_created", 0),
+            0,
+            f"Raw: {result.get('raw_changes', 0)}, Meaningful: {result.get('meaningful', 0)}, Leads: {result.get('leads_created', 0)}"
+        )
+        return result
     except Exception as e:
         db.fail_scan_log(log_id, str(e))
         raise

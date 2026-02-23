@@ -107,6 +107,12 @@ def _heuristic_score(protocol: dict) -> dict:
     else:
         priority = "LOW"
 
+    # Build links from DeFiLlama data
+    slug = protocol.get("slug") or ""
+    twitter = protocol.get("twitter") or ""
+    github_list = protocol.get("github") or []
+    github_url = github_list[0] if isinstance(github_list, list) and github_list else (github_list if isinstance(github_list, str) else "")
+
     return {
         "name": name,
         "category": protocol.get("category") or "Other",
@@ -122,6 +128,11 @@ def _heuristic_score(protocol: dict) -> dict:
         "score_breakdown": breakdown,
         "scored_by": "heuristic",
         "lead_group": "A",
+        "listed_at": protocol.get("listed_at") or "",
+        "website_url": protocol.get("url") or "",
+        "twitter_url": f"https://x.com/{twitter}" if twitter else "",
+        "github_url": github_url,
+        "defillama_url": f"https://defillama.com/protocol/{slug}" if slug else "",
     }
 
 
@@ -311,7 +322,8 @@ async def bulk_score_leads(payload: dict):
 
         # Build SET clause for all provided fields
         allowed = ["score", "priority", "summary", "audit_status",
-                    "funding", "tech", "trigger_info", "lead_group"]
+                    "funding", "tech", "trigger_info", "lead_group",
+                    "listed_at", "website_url", "twitter_url", "github_url", "defillama_url"]
         fields = []
         params = []
 

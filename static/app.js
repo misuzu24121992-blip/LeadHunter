@@ -96,6 +96,21 @@ function leadGroupBadge(group) {
     return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:${c.bg};color:${c.color};border:1px solid ${c.border};">${c.icon} ${c.label}</span>`;
 }
 
+function projectLinksCompact(lead) {
+    const links = [];
+    if (lead.defillama_url) links.push(`<a href="${lead.defillama_url}" target="_blank" title="DeFiLlama" onclick="event.stopPropagation()" style="color:#60a5fa;text-decoration:none;font-size:13px;">📊</a>`);
+    if (lead.website_url) links.push(`<a href="${lead.website_url}" target="_blank" title="Website" onclick="event.stopPropagation()" style="color:#60a5fa;text-decoration:none;font-size:13px;">🌐</a>`);
+    if (lead.twitter_url) links.push(`<a href="${lead.twitter_url}" target="_blank" title="X / Twitter" onclick="event.stopPropagation()" style="color:#60a5fa;text-decoration:none;font-size:13px;">𝕏</a>`);
+    if (lead.github_url) links.push(`<a href="${lead.github_url}" target="_blank" title="GitHub" onclick="event.stopPropagation()" style="color:#60a5fa;text-decoration:none;font-size:13px;">💻</a>`);
+    if (links.length === 0) return '';
+    return `<span style="display:inline-flex;gap:5px;align-items:center;margin-left:4px;">${links.join('')}</span>`;
+}
+
+function listedAtBadge(listedAt) {
+    if (!listedAt) return '';
+    return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;background:rgba(107,114,128,0.12);color:#9ca3af;border:1px solid rgba(107,114,128,0.2);">📅 ${listedAt}</span>`;
+}
+
 // ============================
 //  Dashboard
 // ============================
@@ -196,12 +211,15 @@ function renderLeadCard(lead) {
 
     return `
         <div class="lead-card" onclick="showLeadDetail(${lead.id})">
-            <div class="lead-card-name">${esc(lead.name)}</div>
+            <div class="lead-card-name" style="display:flex;align-items:center;gap:6px;">
+                ${esc(lead.name)} ${projectLinksCompact(lead)}
+            </div>
             <div class="lead-card-meta">
                 ${leadGroupBadge(lead.lead_group)}
                 ${priorityBadge(lead.priority)}
                 ${scoreBadge(lead.score)}
                 ${categoryBadge(lead.category)}
+                ${listedAtBadge(lead.listed_at)}
                 ${scoredByBadge(lead.scored_by)}
             </div>
             <div class="lead-card-summary">${esc(lead.summary || '')}</div>
@@ -279,11 +297,22 @@ function showLeadDetail(id) {
 
     document.getElementById('modal-title').textContent = lead.name;
     document.getElementById('modal-body').innerHTML = `
-        <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;">
+            ${leadGroupBadge(lead.lead_group)}
             ${priorityBadge(lead.priority)} ${scoreBadge(lead.score)} ${categoryBadge(lead.category)}
             <span class="badge badge-source">${esc(lead.source)}</span>
             ${scoredByBadge(lead.scored_by)}
+            ${listedAtBadge(lead.listed_at)}
         </div>
+
+        ${(lead.defillama_url || lead.website_url || lead.twitter_url || lead.github_url) ? `
+        <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; font-size: 13px;">
+            ${lead.defillama_url ? `<a href="${lead.defillama_url}" target="_blank" style="color:#60a5fa;text-decoration:none;">📊 DeFiLlama</a>` : ''}
+            ${lead.website_url ? `<a href="${lead.website_url}" target="_blank" style="color:#60a5fa;text-decoration:none;">🌐 Website</a>` : ''}
+            ${lead.twitter_url ? `<a href="${lead.twitter_url}" target="_blank" style="color:#60a5fa;text-decoration:none;">𝕏 Twitter</a>` : ''}
+            ${lead.github_url ? `<a href="${lead.github_url}" target="_blank" style="color:#60a5fa;text-decoration:none;">💻 GitHub</a>` : ''}
+        </div>
+        ` : ''}
 
         <div class="form-group">
             <label>AI Summary</label>

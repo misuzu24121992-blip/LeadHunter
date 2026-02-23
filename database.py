@@ -229,6 +229,11 @@ def init_tables(conn: sqlite3.Connection):
             score_breakdown TEXT DEFAULT '{}',
             scored_by TEXT DEFAULT 'heuristic',
             lead_group TEXT DEFAULT 'A',
+            listed_at TEXT DEFAULT '',
+            website_url TEXT DEFAULT '',
+            twitter_url TEXT DEFAULT '',
+            github_url TEXT DEFAULT '',
+            defillama_url TEXT DEFAULT '',
             contact_notes TEXT DEFAULT '',
             follow_up_date TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now')),
@@ -296,6 +301,14 @@ def init_tables(conn: sqlite3.Connection):
     except Exception:
         pass  # Column already exists
 
+    # Migration: add link/date columns if missing
+    for col in ['listed_at', 'website_url', 'twitter_url', 'github_url', 'defillama_url']:
+        try:
+            conn.execute(f"ALTER TABLE leads ADD COLUMN {col} TEXT DEFAULT ''")
+            conn.commit()
+        except Exception:
+            pass
+
 
 # ============================
 #  LEADS CRUD
@@ -311,8 +324,9 @@ def insert_lead(lead: dict) -> int | None:
 
     cursor = conn.execute("""
         INSERT INTO leads (name, category, score, priority, source, trigger_info, stage,
-                          funding, tech, audit_status, summary, pitch_services, score_breakdown, scored_by, lead_group)
-        VALUES (?, ?, ?, ?, ?, ?, 'Discovered', ?, ?, ?, ?, ?, ?, ?, ?)
+                          funding, tech, audit_status, summary, pitch_services, score_breakdown,
+                          scored_by, lead_group, listed_at, website_url, twitter_url, github_url, defillama_url)
+        VALUES (?, ?, ?, ?, ?, ?, 'Discovered', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         lead.get("name", "Unknown"),
         lead.get("category", "Other"),
@@ -328,6 +342,11 @@ def insert_lead(lead: dict) -> int | None:
         json.dumps(lead.get("score_breakdown", {}), ensure_ascii=False),
         lead.get("scored_by", "heuristic"),
         lead.get("lead_group", "A"),
+        lead.get("listed_at", ""),
+        lead.get("website_url", ""),
+        lead.get("twitter_url", ""),
+        lead.get("github_url", ""),
+        lead.get("defillama_url", ""),
     ))
     conn.commit()
     return cursor.lastrowid

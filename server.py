@@ -426,6 +426,13 @@ async def run_scan(scan_type: str):
         _scan_lock.release()
 
 
+# ---- RESET ----
+@app.post("/api/reset-db")
+async def reset_db():
+    """Reset database — wipe leads, scan_logs, incidents. Keep watchlist."""
+    return db.reset_database()
+
+
 if __name__ == "__main__":
     print("🚀 Verichains LeadHunter — Starting web server...")
     print("📊 Dashboard: http://localhost:8000")

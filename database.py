@@ -602,3 +602,14 @@ def get_stats() -> dict:
         "categories": categories,
         "last_scan": dict(last_scan) if last_scan else None,
     }
+
+
+def reset_database():
+    """Wipe all leads, scan_logs, and incidents. Keep watchlist intact."""
+    conn = get_conn()
+    conn.execute("DELETE FROM leads")
+    conn.execute("DELETE FROM scan_logs")
+    conn.execute("DELETE FROM incidents")
+    conn.commit()
+    print("[DB] 🗑️  Database reset — leads, scan_logs, incidents cleared")
+    return {"ok": True, "message": "Database reset. Leads, scan_logs, incidents cleared."}

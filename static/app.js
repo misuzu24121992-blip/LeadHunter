@@ -77,11 +77,23 @@ function categoryBadge(cat) {
 function scoredByBadge(scoredBy) {
     if (!scoredBy) return '';
     const isAI = scoredBy.startsWith('ai:');
-    const label = isAI ? `🤖 ${scoredBy.replace('ai:', 'AI:').replace('gemini', 'Gemini').replace('anthropic', 'Claude').replace('openai', 'GPT')}` : '📐 Heuristic';
+    const label = isAI ? `🤖 ${scoredBy.replace('ai:', 'AI:').replace('gemini', 'Gemini').replace('anthropic', 'Claude').replace('openai', 'GPT').replace('antigravity', 'Antigravity')}` : '📐 Heuristic';
     const bg = isAI ? 'rgba(139, 92, 246, 0.15)' : 'rgba(107, 114, 128, 0.15)';
     const color = isAI ? '#a78bfa' : '#9ca3af';
     const border = isAI ? 'rgba(139, 92, 246, 0.3)' : 'rgba(107, 114, 128, 0.3)';
     return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500;background:${bg};color:${color};border:1px solid ${border};">${label}</span>`;
+}
+
+function leadGroupBadge(group) {
+    if (!group) return '';
+    const config = {
+        A: { label: 'A · Net-New', icon: '🆕', bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)' },
+        B: { label: 'B · Upgrade', icon: '⬆️', bg: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: 'rgba(245, 158, 11, 0.3)' },
+        C: { label: 'C · Incident', icon: '🚨', bg: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: 'rgba(239, 68, 68, 0.3)' },
+        D: { label: 'D · Compliance', icon: '📋', bg: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: 'rgba(34, 197, 94, 0.3)' },
+    };
+    const c = config[group] || config.A;
+    return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:${c.bg};color:${c.color};border:1px solid ${c.border};">${c.icon} ${c.label}</span>`;
 }
 
 // ============================
@@ -186,6 +198,7 @@ function renderLeadCard(lead) {
         <div class="lead-card" onclick="showLeadDetail(${lead.id})">
             <div class="lead-card-name">${esc(lead.name)}</div>
             <div class="lead-card-meta">
+                ${leadGroupBadge(lead.lead_group)}
                 ${priorityBadge(lead.priority)}
                 ${scoreBadge(lead.score)}
                 ${categoryBadge(lead.category)}

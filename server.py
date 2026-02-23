@@ -121,6 +121,7 @@ def _heuristic_score(protocol: dict) -> dict:
         "pitch_services": ["Smart Contract Audit"],
         "score_breakdown": breakdown,
         "scored_by": "heuristic",
+        "lead_group": "A",
     }
 
 
@@ -310,7 +311,7 @@ async def bulk_score_leads(payload: dict):
 
         # Build SET clause for all provided fields
         allowed = ["score", "priority", "summary", "audit_status",
-                    "funding", "tech", "trigger_info"]
+                    "funding", "tech", "trigger_info", "lead_group"]
         fields = []
         params = []
 

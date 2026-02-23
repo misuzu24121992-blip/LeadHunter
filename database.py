@@ -228,6 +228,7 @@ def init_tables(conn: sqlite3.Connection):
             pitch_services TEXT DEFAULT '',
             score_breakdown TEXT DEFAULT '{}',
             scored_by TEXT DEFAULT 'heuristic',
+            lead_group TEXT DEFAULT 'A',
             contact_notes TEXT DEFAULT '',
             follow_up_date TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now')),
@@ -288,6 +289,13 @@ def init_tables(conn: sqlite3.Connection):
     except Exception:
         pass  # Column already exists
 
+    # Migration: add lead_group column if missing
+    try:
+        conn.execute("ALTER TABLE leads ADD COLUMN lead_group TEXT DEFAULT 'A'")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
+
 
 # ============================
 #  LEADS CRUD
@@ -303,8 +311,8 @@ def insert_lead(lead: dict) -> int | None:
 
     cursor = conn.execute("""
         INSERT INTO leads (name, category, score, priority, source, trigger_info, stage,
-                          funding, tech, audit_status, summary, pitch_services, score_breakdown, scored_by)
-        VALUES (?, ?, ?, ?, ?, ?, 'Discovered', ?, ?, ?, ?, ?, ?, ?)
+                          funding, tech, audit_status, summary, pitch_services, score_breakdown, scored_by, lead_group)
+        VALUES (?, ?, ?, ?, ?, ?, 'Discovered', ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         lead.get("name", "Unknown"),
         lead.get("category", "Other"),
@@ -319,6 +327,7 @@ def insert_lead(lead: dict) -> int | None:
         ", ".join(lead.get("pitch_services", [])),
         json.dumps(lead.get("score_breakdown", {}), ensure_ascii=False),
         lead.get("scored_by", "heuristic"),
+        lead.get("lead_group", "A"),
     ))
     conn.commit()
     return cursor.lastrowid

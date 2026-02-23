@@ -295,20 +295,28 @@ async def debug_info():
         ai_status["gemini_key_set"] = bool(config.GEMINI_API_KEY)
         ai_status["gemini_key_prefix"] = config.GEMINI_API_KEY[:10] + "..." if config.GEMINI_API_KEY else ""
         ai_status["circuit_broken"] = ai_scorer._circuit_broken
-        # Reset circuit breaker for test
         ai_scorer.reset_circuit_breaker()
-        # Try a minimal AI call to test
+        # Direct Gemini call — bypass _chat to capture raw error
         try:
-            test_result = ai_scorer._chat(
-                "You are a test bot. Return exactly: {\"test\": true}",
-                "Return JSON: {\"test\": true}",
-                max_tokens=50,
-            )
-            ai_status["test_call_result"] = test_result
+            if ai_scorer.provider == "gemini" and ai_scorer.client:
+                from google.genai import types
+                response = ai_scorer.client.models.generate_content(
+                    model=config.GEMINI_MODEL,
+                    contents="Return JSON: {\"test\": true}",
+                    config=types.GenerateContentConfig(
+                        system_instruction="Return exactly: {\"test\": true}",
+                        max_output_tokens=50,
+                        temperature=0.3,
+                        response_mime_type="application/json",
+                    ),
+                )
+                ai_status["direct_call_result"] = response.text
+            else:
+                ai_status["direct_call_result"] = "skipped (not gemini)"
         except Exception as te:
-            ai_status["test_call_error"] = str(te)
+            ai_status["direct_call_error"] = f"{type(te).__name__}: {str(te)}"
     except Exception as e:
-        ai_status["error"] = str(e)
+        ai_status["error"] = f"{type(e).__name__}: {str(e)}"
 
     return {
         "ai": ai_status,

@@ -361,6 +361,7 @@ function showLeadDetail(id) {
 
         <div class="form-actions">
             <button class="btn btn-danger btn-sm" onclick="deleteLead(${lead.id})">Delete</button>
+            <button class="btn" style="background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3);font-size:12px;" onclick="addLeadToWatchlist(${lead.id})">👁️ Monitor for Upgrades</button>
             <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             <button class="btn btn-primary" onclick="saveLeadNotes(${lead.id})">Save Notes</button>
         </div>
@@ -398,6 +399,33 @@ async function deleteLead(id) {
         loadDashboard();
     } catch (e) {
         toast('Delete failed: ' + e.message, 'error');
+    }
+}
+
+async function addLeadToWatchlist(leadId) {
+    const lead = allLeads.find(l => l.id === leadId);
+    if (!lead) return;
+
+    const project = {
+        name: lead.name,
+        github_repo: lead.github_url || '',
+        x_account: lead.twitter_url || '',
+        category: lead.category || 'DeFi',
+        last_audit_date: '',
+        auditor: (lead.audit_status || '').includes('✅') ? lead.audit_status.substring(0, 60) : '',
+        client_type: 'Mid-cap',
+        notes: `From pipeline (score: ${lead.score}, group: ${lead.lead_group || 'A'}). ${lead.audit_status || ''}`,
+    };
+
+    try {
+        await api('/api/watchlist', { method: 'POST', body: project });
+        toast(`${lead.name} added to Watchlist for monitoring!`, 'success');
+    } catch (e) {
+        if (e.message.includes('409') || e.message.includes('already')) {
+            toast(`${lead.name} already in watchlist`, 'info');
+        } else {
+            toast('Failed: ' + e.message, 'error');
+        }
     }
 }
 

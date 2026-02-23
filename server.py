@@ -278,6 +278,28 @@ async def root():
 
 
 # ---- STATS ----
+@app.get("/api/debug")
+async def debug_info():
+    """Debug endpoint to check system status."""
+    import config
+    ai_status = {"provider": "none", "client": False, "error": None}
+    try:
+        import ai_scorer
+        ai_status["provider"] = ai_scorer.provider
+        ai_status["client"] = ai_scorer.client is not None
+        ai_status["gemini_key_set"] = bool(config.GEMINI_API_KEY)
+        ai_status["gemini_key_prefix"] = config.GEMINI_API_KEY[:10] + "..." if config.GEMINI_API_KEY else ""
+    except Exception as e:
+        ai_status["error"] = str(e)
+
+    return {
+        "ai": ai_status,
+        "db_type": type(db.get_conn()).__name__,
+        "turso_url_set": bool(db.TURSO_URL),
+        "is_vercel": bool(db.IS_VERCEL),
+    }
+
+
 @app.get("/api/stats")
 async def get_stats():
     return db.get_stats()

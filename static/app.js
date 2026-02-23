@@ -440,19 +440,25 @@ async function loadWatchlist() {
             tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="empty-state-icon">👁️</div>No projects yet. Click "Add Project" to start.</td></tr>';
             return;
         }
-        tbody.innerHTML = items.map(item => `
+        tbody.innerHTML = items.map(item => {
+            let proxyCount = 0;
+            try {
+                const pc = typeof item.proxy_contracts === 'string' ? JSON.parse(item.proxy_contracts || '{}') : (item.proxy_contracts || {});
+                proxyCount = Object.values(pc).reduce((sum, addrs) => sum + (Array.isArray(addrs) ? addrs.length : 0), 0);
+            } catch (e) { }
+            return `
             <tr>
                 <td><strong>${esc(item.name)}</strong></td>
                 <td>${categoryBadge(item.category || 'Other')}</td>
                 <td>${item.github_repo ? `<a href="${esc(item.github_repo)}" target="_blank">📂 Repo</a>` : '—'}</td>
                 <td>${item.snapshot_space ? esc(item.snapshot_space) : '—'}</td>
                 <td><span class="badge badge-source">${esc(item.client_type || '—')}</span></td>
-                <td>${item.last_audit_date || '—'}</td>
+                <td>${proxyCount > 0 ? `<button class="btn btn-ghost btn-sm" onclick="showProxyContracts(${item.id})" style="color:#818cf8;">🔗 ${proxyCount}</button>` : `<button class="btn btn-ghost btn-sm" onclick="showProxyContracts(${item.id})" style="color:var(--text-tertiary);">+ Add</button>`}</td>
                 <td>
                     <button class="btn btn-ghost btn-sm" onclick="deleteWatchlistItem(${item.id})">🗑️</button>
                 </td>
             </tr>
-        `).join('');
+        `}).join('');
     } catch (e) {
         toast('Failed to load watchlist: ' + e.message, 'error');
     }
@@ -502,6 +508,11 @@ function showAddWatchlistModal() {
             <input type="date" id="wl-audit-date">
         </div>
         <div class="form-group">
+            <label>Proxy Contracts <span style="color:var(--text-tertiary);font-weight:normal;">(for on-chain monitoring)</span></label>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px;">One per line: chain:address (e.g. ethereum:0xabc...)</div>
+            <textarea id="wl-proxies" rows="3" placeholder="ethereum:0xabc...&#10;arbitrum:0xdef...&#10;base:0x123..."></textarea>
+        </div>
+        <div class="form-group">
             <label>Notes</label>
             <textarea id="wl-notes" rows="2" placeholder="Additional notes..."></textarea>
         </div>
@@ -514,6 +525,19 @@ function showAddWatchlistModal() {
 }
 
 async function addWatchlistProject() {
+    // Parse proxy contracts from textarea
+    const proxyText = document.getElementById('wl-proxies').value.trim();
+    const proxies = {};
+    if (proxyText) {
+        for (const line of proxyText.split('\n')) {
+            const [chain, addr] = line.split(':').map(s => s.trim());
+            if (chain && addr) {
+                if (!proxies[chain]) proxies[chain] = [];
+                proxies[chain].push(addr.toLowerCase());
+            }
+        }
+    }
+
     const project = {
         name: document.getElementById('wl-name').value.trim(),
         github_repo: document.getElementById('wl-github').value.trim(),
@@ -522,6 +546,7 @@ async function addWatchlistProject() {
         category: document.getElementById('wl-category').value,
         client_type: document.getElementById('wl-client-type').value,
         last_audit_date: document.getElementById('wl-audit-date').value,
+        proxy_contracts: JSON.stringify(proxies),
         notes: document.getElementById('wl-notes').value.trim(),
     };
 
@@ -545,6 +570,94 @@ async function deleteWatchlistItem(id) {
         loadWatchlist();
     } catch (e) {
         toast('Delete failed: ' + e.message, 'error');
+    }
+}
+
+// Store watchlist items for proxy editing
+let watchlistItems = [];
+
+async function showProxyContracts(itemId) {
+    // Fetch fresh watchlist to get current data
+    try {
+        watchlistItems = await api('/api/watchlist');
+    } catch (e) {
+        toast('Failed to load watchlist', 'error');
+        return;
+    }
+    const item = watchlistItems.find(i => i.id === itemId);
+    if (!item) return;
+
+    let proxies = {};
+    try {
+        proxies = typeof item.proxy_contracts === 'string'
+            ? JSON.parse(item.proxy_contracts || '{}')
+            : (item.proxy_contracts || {});
+    } catch (e) { }
+
+    // Convert to text format
+    const lines = [];
+    for (const [chain, addrs] of Object.entries(proxies)) {
+        if (Array.isArray(addrs)) {
+            addrs.forEach(a => lines.push(`${chain}:${a}`));
+        }
+    }
+
+    const supportedChains = ['ethereum', 'arbitrum', 'base', 'optimism', 'polygon', 'bsc', 'avalanche', 'sonic'];
+
+    document.getElementById('modal-title').textContent = `🔗 ${item.name} — Proxy Contracts`;
+    document.getElementById('modal-body').innerHTML = `
+        <div class="form-group">
+            <label>On-chain Proxy Addresses</label>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;">
+                One per line: <code>chain:0xaddress</code><br>
+                Supported chains: ${supportedChains.map(c => `<code>${c}</code>`).join(', ')}
+            </div>
+            <textarea id="proxy-edit" rows="6" style="font-family:monospace;font-size:12px;"
+                placeholder="ethereum:0xabc...&#10;arbitrum:0xdef...">${lines.join('\n')}</textarea>
+        </div>
+        <div style="padding:10px 14px;background:rgba(99,102,241,0.08);border-radius:var(--radius-sm);border:1px solid rgba(99,102,241,0.2);margin-bottom:16px;">
+            <div style="font-size:12px;color:#818cf8;">💡 Where to find proxy addresses</div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">
+                Check the project's docs or Etherscan. Look for "Proxy" label on the contract page.
+                Common proxies: TransparentProxy, UUPS, Beacon.
+            </div>
+        </div>
+        <div class="form-actions">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveProxyContracts(${itemId})">Save</button>
+        </div>
+    `;
+    openModal();
+}
+
+async function saveProxyContracts(itemId) {
+    const text = document.getElementById('proxy-edit').value.trim();
+    const proxies = {};
+    if (text) {
+        for (const line of text.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            const colonIdx = trimmed.indexOf(':');
+            if (colonIdx < 1) continue;
+            const chain = trimmed.substring(0, colonIdx).trim().toLowerCase();
+            const addr = trimmed.substring(colonIdx + 1).trim().toLowerCase();
+            if (chain && addr && addr.startsWith('0x')) {
+                if (!proxies[chain]) proxies[chain] = [];
+                proxies[chain].push(addr);
+            }
+        }
+    }
+
+    try {
+        await api(`/api/watchlist/${itemId}`, {
+            method: 'PATCH',
+            body: { proxy_contracts: JSON.stringify(proxies) }
+        });
+        toast('Proxy contracts saved!', 'success');
+        closeModal();
+        loadWatchlist();
+    } catch (e) {
+        toast('Save failed: ' + e.message, 'error');
     }
 }
 

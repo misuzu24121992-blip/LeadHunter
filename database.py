@@ -250,6 +250,7 @@ def init_tables(conn: sqlite3.Connection):
             last_audit_date TEXT DEFAULT '',
             auditor TEXT DEFAULT '',
             client_type TEXT DEFAULT '',
+            proxy_contracts TEXT DEFAULT '{}',
             notes TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now'))
         );
@@ -308,6 +309,13 @@ def init_tables(conn: sqlite3.Connection):
             conn.commit()
         except Exception:
             pass
+
+    # Migration: add proxy_contracts column to watchlist if missing
+    try:
+        conn.execute("ALTER TABLE watchlist ADD COLUMN proxy_contracts TEXT DEFAULT '{}'")
+        conn.commit()
+    except Exception:
+        pass
 
 
 # ============================
@@ -426,8 +434,9 @@ def insert_watchlist(project: dict) -> int | None:
 
     cursor = conn.execute("""
         INSERT INTO watchlist (name, github_repo, snapshot_space, x_account,
-                              category, last_audit_date, auditor, client_type, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              category, last_audit_date, auditor, client_type,
+                              proxy_contracts, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         project.get("name", ""),
         project.get("github_repo", ""),
@@ -437,6 +446,7 @@ def insert_watchlist(project: dict) -> int | None:
         project.get("last_audit_date", ""),
         project.get("auditor", ""),
         project.get("client_type", ""),
+        project.get("proxy_contracts", "{}"),
         project.get("notes", ""),
     ))
     conn.commit()
@@ -455,7 +465,8 @@ def get_watchlist(category: str = None) -> list[dict]:
 def update_watchlist_item(item_id: int, updates: dict) -> bool:
     conn = get_conn()
     allowed = ["name", "github_repo", "snapshot_space", "x_account",
-               "category", "last_audit_date", "auditor", "client_type", "notes"]
+               "category", "last_audit_date", "auditor", "client_type",
+               "proxy_contracts", "notes"]
     fields = []
     params = []
     for key in allowed:

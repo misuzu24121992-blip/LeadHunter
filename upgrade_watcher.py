@@ -565,7 +565,7 @@ def run_scan(watchlist: list[dict], db_module=None) -> dict:
     print(f"📦 Projects to monitor: {len(watchlist)}")
     print()
 
-    sources = sys.argv[1:] if len(sys.argv) > 1 else ["github", "snapshot"]
+    sources = sys.argv[1:] if len(sys.argv) > 1 else ["github", "snapshot", "onchain"]
 
     state = load_state()
     all_changes = []
@@ -581,13 +581,27 @@ def run_scan(watchlist: list[dict], db_module=None) -> dict:
     # Filter through keyword rules
     meaningful = filter_changes(all_changes)
 
-    # Auto-create Group B leads
+    # Auto-create Group B leads from GitHub/Snapshot
     leads_created = 0
     if meaningful and db_module:
         leads_created = create_group_b_leads(meaningful, db_module)
 
     # Save state
     save_state(state)
+
+    # Phase 2: On-chain Upgraded() event monitoring
+    onchain_summary = {"upgrades_detected": 0, "leads_created": 0}
+    if "onchain" in sources:
+        try:
+            from onchain_monitor import scan_upgrades
+            onchain_summary = scan_upgrades(watchlist, db_module=db_module)
+            leads_created += onchain_summary.get("leads_created", 0)
+        except ImportError:
+            print("  [OnChain] ⚠️  onchain_monitor not available, skipping")
+        except Exception as e:
+            print(f"  [OnChain] ❌ Error: {e}")
+
+    onchain_count = onchain_summary.get("upgrades_detected", 0)
 
     # Summary
     print("\n" + "=" * 60)
@@ -596,6 +610,7 @@ def run_scan(watchlist: list[dict], db_module=None) -> dict:
     print(f"  📦 Projects monitored: {len(watchlist)}")
     print(f"  🔔 Raw changes detected: {len(all_changes)}")
     print(f"  ✅ Meaningful (after filter): {len(meaningful)}")
+    print(f"  🔗 On-chain upgrades: {onchain_count}")
     print(f"  🆕 Group B leads created: {leads_created}")
     print()
 
@@ -603,6 +618,7 @@ def run_scan(watchlist: list[dict], db_module=None) -> dict:
         "projects_monitored": len(watchlist),
         "raw_changes": len(all_changes),
         "meaningful": len(meaningful),
+        "onchain_upgrades": onchain_count,
         "leads_created": leads_created,
         "changes": [
             {

@@ -146,20 +146,25 @@ def _run_lead_scan():
         ai_ok = ai_fail = 0
         if use_ai:
             ai_scorer.reset_circuit_breaker()
-            print(f"[Scan] Using AI scoring ({ai_scorer.provider})...")
+            # On Vercel (60s timeout), limit AI scoring to avoid timeout
+            # 12 calls × 4.5s = 54s, leaving margin for DB writes
+            is_serverless = os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
+            max_ai = 12 if is_serverless else len(protocols)
+            print(f"[Scan] Using AI scoring ({ai_scorer.provider}), max AI calls: {max_ai}...")
             for i, protocol in enumerate(protocols):
-                text = lead_hunter.format_defillama_for_scoring(protocol)
-                result = ai_scorer.score_lead(text, "DeFiLlama")
-                if result:
-                    result["scored_by"] = f"ai:{ai_scorer.provider}"
-                    scored.append(result)
-                    ai_ok += 1
-                    print(f"  ✅ {i+1}/{len(protocols)}: {result.get('name', '?')} → {result.get('score', 0)}/100 ({result.get('priority', '?')})")
-                else:
-                    # Fallback to heuristic for this lead
-                    scored.append(_heuristic_score(protocol))
+                if i < max_ai and not ai_scorer._circuit_broken:
+                    text = lead_hunter.format_defillama_for_scoring(protocol)
+                    result = ai_scorer.score_lead(text, "DeFiLlama")
+                    if result:
+                        result["scored_by"] = f"ai:{ai_scorer.provider}"
+                        scored.append(result)
+                        ai_ok += 1
+                        print(f"  ✅ {i+1}/{len(protocols)}: {result.get('name', '?')} → {result.get('score', 0)}/100 ({result.get('priority', '?')})")
+                        continue
                     ai_fail += 1
                     print(f"  ⚠️  {i+1}/{len(protocols)}: {protocol.get('name', '?')} → heuristic fallback")
+                # Heuristic fallback (for AI failures or beyond max_ai)
+                scored.append(_heuristic_score(protocol))
         else:
             print("[Scan] No AI key — using heuristic scoring...")
             for protocol in protocols:

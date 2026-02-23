@@ -157,7 +157,7 @@ Always respond with valid JSON only."""
 import time as _time
 
 _last_call_time = 0.0
-_GEMINI_MIN_INTERVAL = 1.0  # Gemini 2.0 Flash: 1500 RPM — 1s safe margin for serverless
+_GEMINI_MIN_INTERVAL = 4.5  # 15 RPM free tier → 1 call per 4s + margin
 _consecutive_rate_limits = 0
 _circuit_broken = False  # When True, skip retries entirely
 
@@ -190,7 +190,7 @@ def _chat(system_prompt: str, user_prompt: str, max_tokens: int = None) -> str |
             wait = _GEMINI_MIN_INTERVAL - elapsed
             _time.sleep(wait)
 
-    max_retries = 3
+    max_retries = 1  # Keep low for serverless (avoid wasting timeout)
     for attempt in range(max_retries + 1):
         try:
             _last_call_time = _time.time()
@@ -242,7 +242,7 @@ def _chat(system_prompt: str, user_prompt: str, max_tokens: int = None) -> str |
             if is_rate_limit:
                 _consecutive_rate_limits += 1
                 # Circuit breaker: after 2 consecutive rate limits, give up for this scan
-                if _consecutive_rate_limits >= 2:
+                if _consecutive_rate_limits >= 3:  # Higher threshold before giving up
                     _circuit_broken = True
                     print(f"[AI Scorer] 🔴 Quota exhausted — switching to heuristic for remaining leads")
                     return None

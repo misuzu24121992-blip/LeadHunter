@@ -157,7 +157,7 @@ Always respond with valid JSON only."""
 import time as _time
 
 _last_call_time = 0.0
-_GEMINI_MIN_INTERVAL = 5.0  # 15 RPM → 1 call per 5 seconds (safe margin)
+_GEMINI_MIN_INTERVAL = 1.0  # Gemini 2.0 Flash: 1500 RPM — 1s safe margin for serverless
 _consecutive_rate_limits = 0
 _circuit_broken = False  # When True, skip retries entirely
 
@@ -247,7 +247,7 @@ def _chat(system_prompt: str, user_prompt: str, max_tokens: int = None) -> str |
                     print(f"[AI Scorer] 🔴 Quota exhausted — switching to heuristic for remaining leads")
                     return None
                 if attempt < max_retries:
-                    wait = 10 * (2 ** attempt)  # 10s, 20s, 40s
+                    wait = 2 * (2 ** attempt)  # 2s, 4s, 8s — keep short for serverless
                     print(f"[AI Scorer] ⏳ Rate limited. Retry {attempt + 1}/{max_retries} in {wait}s...")
                     _time.sleep(wait)
                     continue

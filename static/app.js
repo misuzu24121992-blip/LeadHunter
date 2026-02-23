@@ -74,6 +74,16 @@ function categoryBadge(cat) {
     return `<span class="badge badge-category">${cat}</span>`;
 }
 
+function scoredByBadge(scoredBy) {
+    if (!scoredBy) return '';
+    const isAI = scoredBy.startsWith('ai:');
+    const label = isAI ? `🤖 ${scoredBy.replace('ai:', 'AI:').replace('gemini', 'Gemini').replace('anthropic', 'Claude').replace('openai', 'GPT')}` : '📐 Heuristic';
+    const bg = isAI ? 'rgba(139, 92, 246, 0.15)' : 'rgba(107, 114, 128, 0.15)';
+    const color = isAI ? '#a78bfa' : '#9ca3af';
+    const border = isAI ? 'rgba(139, 92, 246, 0.3)' : 'rgba(107, 114, 128, 0.3)';
+    return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500;background:${bg};color:${color};border:1px solid ${border};">${label}</span>`;
+}
+
 // ============================
 //  Dashboard
 // ============================
@@ -179,6 +189,7 @@ function renderLeadCard(lead) {
                 ${priorityBadge(lead.priority)}
                 ${scoreBadge(lead.score)}
                 ${categoryBadge(lead.category)}
+                ${scoredByBadge(lead.scored_by)}
             </div>
             <div class="lead-card-summary">${esc(lead.summary || '')}</div>
             <div class="lead-card-actions" onclick="event.stopPropagation()">
@@ -258,6 +269,7 @@ function showLeadDetail(id) {
         <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
             ${priorityBadge(lead.priority)} ${scoreBadge(lead.score)} ${categoryBadge(lead.category)}
             <span class="badge badge-source">${esc(lead.source)}</span>
+            ${scoredByBadge(lead.scored_by)}
         </div>
 
         <div class="form-group">

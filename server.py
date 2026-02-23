@@ -119,6 +119,7 @@ def _heuristic_score(protocol: dict) -> dict:
         "audit_status": "Unknown — needs review",
         "pitch_services": ["Smart Contract Audit"],
         "score_breakdown": breakdown,
+        "scored_by": "heuristic",
     }
 
 
@@ -150,6 +151,7 @@ def _run_lead_scan():
                 text = lead_hunter.format_defillama_for_scoring(protocol)
                 result = ai_scorer.score_lead(text, "DeFiLlama")
                 if result:
+                    result["scored_by"] = f"ai:{ai_scorer.provider}"
                     scored.append(result)
                     ai_ok += 1
                     print(f"  ✅ {i+1}/{len(protocols)}: {result.get('name', '?')} → {result.get('score', 0)}/100 ({result.get('priority', '?')})")

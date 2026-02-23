@@ -289,14 +289,17 @@ async def debug_info():
         ai_status["client"] = ai_scorer.client is not None
         ai_status["gemini_key_set"] = bool(config.GEMINI_API_KEY)
         ai_status["gemini_key_prefix"] = config.GEMINI_API_KEY[:10] + "..." if config.GEMINI_API_KEY else ""
+        ai_status["circuit_broken"] = ai_scorer._circuit_broken
+        # Reset circuit breaker for test
+        ai_scorer.reset_circuit_breaker()
         # Try a minimal AI call to test
         try:
             test_result = ai_scorer._chat(
+                "You are a test bot. Return exactly: {\"test\": true}",
                 "Return JSON: {\"test\": true}",
-                "Test call. Return: {\"test\": true}",
                 max_tokens=50,
             )
-            ai_status["test_call"] = test_result
+            ai_status["test_call_result"] = test_result
         except Exception as te:
             ai_status["test_call_error"] = str(te)
     except Exception as e:

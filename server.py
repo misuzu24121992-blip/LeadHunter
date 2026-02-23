@@ -10,6 +10,7 @@ Usage:
 """
 
 import os
+import json
 import threading
 from contextlib import asynccontextmanager
 
@@ -124,7 +125,8 @@ def _heuristic_score(protocol: dict) -> dict:
 
 
 def _run_lead_scan():
-    """Run lead_hunter scan in background."""
+    """Run lead_hunter scan — heuristic scoring only.
+    AI scoring is handled separately by Antigravity via /api/leads/bulk-score."""
     import lead_hunter
     import database as db
 
@@ -133,42 +135,11 @@ def _run_lead_scan():
         existing = db.get_lead_names()
         protocols = lead_hunter.fetch_defillama_new_protocols()
 
-        # Try AI scoring first, fallback to heuristic per-lead
+        # Heuristic scoring — fast, no API needed
         scored = []
-        use_ai = False
-        try:
-            import ai_scorer
-            if ai_scorer.client:
-                use_ai = True
-        except Exception:
-            pass
-
-        ai_ok = ai_fail = 0
-        if use_ai:
-            ai_scorer.reset_circuit_breaker()
-            # On Vercel (60s timeout), limit AI scoring to avoid timeout
-            # 12 calls × 4.5s = 54s, leaving margin for DB writes
-            is_serverless = os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
-            max_ai = 12 if is_serverless else len(protocols)
-            print(f"[Scan] Using AI scoring ({ai_scorer.provider}), max AI calls: {max_ai}...")
-            for i, protocol in enumerate(protocols):
-                if i < max_ai and not ai_scorer._circuit_broken:
-                    text = lead_hunter.format_defillama_for_scoring(protocol)
-                    result = ai_scorer.score_lead(text, "DeFiLlama")
-                    if result:
-                        result["scored_by"] = f"ai:{ai_scorer.provider}"
-                        scored.append(result)
-                        ai_ok += 1
-                        print(f"  ✅ {i+1}/{len(protocols)}: {result.get('name', '?')} → {result.get('score', 0)}/100 ({result.get('priority', '?')})")
-                        continue
-                    ai_fail += 1
-                    print(f"  ⚠️  {i+1}/{len(protocols)}: {protocol.get('name', '?')} → heuristic fallback")
-                # Heuristic fallback (for AI failures or beyond max_ai)
-                scored.append(_heuristic_score(protocol))
-        else:
-            print("[Scan] No AI key — using heuristic scoring...")
-            for protocol in protocols:
-                scored.append(_heuristic_score(protocol))
+        print(f"[Scan] Heuristic scoring {len(protocols)} protocols...")
+        for protocol in protocols:
+            scored.append(_heuristic_score(protocol))
 
         hot = warm = pushed = 0
         existing_lower = [n.lower() for n in existing]
@@ -187,10 +158,9 @@ def _run_lead_scan():
                     warm += 1
                 existing_lower.append(name.lower())
 
-        mode = f"AI({ai_ok})+heuristic({ai_fail})" if use_ai and ai_fail > 0 else ("AI" if use_ai else "heuristic")
         db.complete_scan_log(log_id, pushed, hot, warm,
-                            f"Found {len(protocols)} protocols ({mode}), scored {len(scored)}, pushed {pushed}")
-        return {"pushed": pushed, "hot": hot, "warm": warm, "total_found": len(protocols), "mode": mode}
+                            f"Found {len(protocols)} protocols (heuristic), pushed {pushed}")
+        return {"pushed": pushed, "hot": hot, "warm": warm, "total_found": len(protocols), "mode": "heuristic"}
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -283,49 +253,6 @@ async def root():
 
 
 # ---- STATS ----
-@app.get("/api/debug")
-async def debug_info():
-    """Debug endpoint to check system status."""
-    import config
-    ai_status = {"provider": "none", "client": False, "error": None}
-    try:
-        import ai_scorer
-        ai_status["provider"] = ai_scorer.provider
-        ai_status["client"] = ai_scorer.client is not None
-        ai_status["gemini_key_set"] = bool(config.GEMINI_API_KEY)
-        ai_status["gemini_key_prefix"] = config.GEMINI_API_KEY[:10] + "..." if config.GEMINI_API_KEY else ""
-        ai_status["circuit_broken"] = ai_scorer._circuit_broken
-        ai_scorer.reset_circuit_breaker()
-        # Direct Gemini call — bypass _chat to capture raw error
-        try:
-            if ai_scorer.provider == "gemini" and ai_scorer.client:
-                from google.genai import types
-                response = ai_scorer.client.models.generate_content(
-                    model=config.GEMINI_MODEL,
-                    contents="Return JSON: {\"test\": true}",
-                    config=types.GenerateContentConfig(
-                        system_instruction="Return exactly: {\"test\": true}",
-                        max_output_tokens=50,
-                        temperature=0.3,
-                        response_mime_type="application/json",
-                    ),
-                )
-                ai_status["direct_call_result"] = response.text
-            else:
-                ai_status["direct_call_result"] = "skipped (not gemini)"
-        except Exception as te:
-            ai_status["direct_call_error"] = f"{type(te).__name__}: {str(te)}"
-    except Exception as e:
-        ai_status["error"] = f"{type(e).__name__}: {str(e)}"
-
-    return {
-        "ai": ai_status,
-        "db_type": type(db.get_conn()).__name__,
-        "turso_url_set": bool(db.TURSO_URL),
-        "is_vercel": bool(db.IS_VERCEL),
-    }
-
-
 @app.get("/api/stats")
 async def get_stats():
     return db.get_stats()
@@ -350,6 +277,71 @@ async def update_lead(lead_id: int, updates: dict):
 async def delete_lead(lead_id: int):
     db.delete_lead(lead_id)
     return {"ok": True}
+
+
+@app.get("/api/leads/unscored")
+async def get_unscored_leads():
+    """Get leads that haven't been AI-scored yet (scored_by = 'heuristic').
+    Used by Antigravity to fetch leads for deep analysis."""
+    conn = db.get_conn()
+    rows = conn.execute(
+        "SELECT * FROM leads WHERE scored_by = 'heuristic' ORDER BY score DESC"
+    ).fetchall()
+    return {"leads": [dict(r) for r in rows], "count": len(rows)}
+
+
+@app.post("/api/leads/bulk-score")
+async def bulk_score_leads(payload: dict):
+    """Accept AI-scored results from Antigravity and update leads in DB.
+    Expects: { "scores": [ { "id": int, "score": int, "priority": str,
+                              "summary": str, "score_breakdown": dict,
+                              "audit_status": str, "pitch_services": list,
+                              "funding": str, "tech": str } ] }"""
+    scores = payload.get("scores", [])
+    if not scores:
+        raise HTTPException(400, "No scores provided")
+
+    updated = 0
+    conn = db.get_conn()
+    for item in scores:
+        lead_id = item.get("id")
+        if not lead_id:
+            continue
+
+        # Build SET clause for all provided fields
+        allowed = ["score", "priority", "summary", "audit_status",
+                    "funding", "tech", "trigger_info"]
+        fields = []
+        params = []
+
+        for key in allowed:
+            if key in item:
+                fields.append(f"{key} = ?")
+                params.append(item[key])
+
+        # Handle JSON fields
+        if "score_breakdown" in item:
+            fields.append("score_breakdown = ?")
+            params.append(json.dumps(item["score_breakdown"], ensure_ascii=False))
+
+        if "pitch_services" in item:
+            fields.append("pitch_services = ?")
+            services = item["pitch_services"]
+            params.append(", ".join(services) if isinstance(services, list) else services)
+
+        # Always set scored_by and updated_at
+        fields.append("scored_by = ?")
+        params.append(item.get("scored_by", "ai:antigravity"))
+        fields.append("updated_at = datetime('now')")
+
+        if fields:
+            params.append(lead_id)
+            sql = f"UPDATE leads SET {', '.join(fields)} WHERE id = ?"
+            conn.execute(sql, params)
+            conn.commit()
+            updated += 1
+
+    return {"ok": True, "updated": updated, "total": len(scores)}
 
 
 # ---- WATCHLIST ----

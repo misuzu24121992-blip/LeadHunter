@@ -69,7 +69,8 @@ CHAIN_APIS = {
 UPGRADED_TOPIC = "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bf63e2c4e82a1d7b0add4f783"
 
 # State file for tracking last-seen blocks
-STATE_FILE = os.path.join(os.path.dirname(__file__), "onchain_state.json")
+_state_dir = "/tmp" if os.environ.get("VERCEL") else os.path.dirname(__file__)
+STATE_FILE = os.path.join(_state_dir, "onchain_state.json")
 
 
 def _load_state() -> dict:

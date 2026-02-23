@@ -65,7 +65,8 @@ GOVERNANCE_KEYWORDS = [
 #  State Tracking (avoid duplicate alerts)
 # ================================================================
 
-STATE_FILE = os.path.join(os.path.dirname(__file__), ".watcher_state.json")
+_state_dir = "/tmp" if os.environ.get("VERCEL") else os.path.dirname(__file__)
+STATE_FILE = os.path.join(_state_dir, ".watcher_state.json")
 
 
 def load_state() -> dict:

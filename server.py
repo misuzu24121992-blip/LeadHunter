@@ -137,8 +137,9 @@ def _heuristic_score(protocol: dict) -> dict:
 
 
 def _run_lead_scan():
-    """Run lead_hunter scan — heuristic scoring only.
-    AI scoring is handled separately by Antigravity via /api/leads/bulk-score."""
+    """Run lead_hunter scan with heuristic + AI scoring.
+    Phase 1: Heuristic scoring (fast, inserts leads into DB)
+    Phase 2: AI scoring via Gemini (upgrades heuristic leads with deep analysis)"""
     import lead_hunter
     import database as db
 
@@ -147,32 +148,119 @@ def _run_lead_scan():
         existing = db.get_lead_names()
         protocols = lead_hunter.fetch_defillama_new_protocols()
 
-        # Heuristic scoring — fast, no API needed
+        # Phase 1: Heuristic scoring — fast, no API needed
         scored = []
-        print(f"[Scan] Heuristic scoring {len(protocols)} protocols...")
+        print(f"[Scan] Phase 1: Heuristic scoring {len(protocols)} protocols...")
         for protocol in protocols:
             scored.append(_heuristic_score(protocol))
 
         hot = warm = pushed = 0
+        new_lead_ids = []
+        new_protocols = []
         existing_lower = [n.lower() for n in existing]
-        for lead in scored:
+        for i, lead in enumerate(scored):
             name = lead.get("name", "")
             score = lead.get("score", 0)
             if name.lower() in existing_lower:
                 continue
             if score < 40:
                 continue
-            if db.insert_lead(lead):
+            lead_id = db.insert_lead(lead)
+            if lead_id:
                 pushed += 1
+                new_lead_ids.append(lead_id)
+                new_protocols.append(protocols[i] if i < len(protocols) else {})
                 if score >= 75:
                     hot += 1
                 elif score >= 55:
                     warm += 1
                 existing_lower.append(name.lower())
 
-        db.complete_scan_log(log_id, pushed, hot, warm,
-                            f"Found {len(protocols)} protocols (heuristic), pushed {pushed}")
-        return {"pushed": pushed, "hot": hot, "warm": warm, "total_found": len(protocols), "mode": "heuristic"}
+        # Phase 2: AI scoring — upgrade heuristic leads with Gemini/Anthropic/OpenAI
+        mode = "heuristic"
+        ai_scored = 0
+        try:
+            import ai_scorer
+            import time as _time
+            if ai_scorer.client:
+                ai_scorer.reset_circuit_breaker()
+                ai_start = _time.time()
+                AI_TIME_BUDGET = 40  # seconds — leave 20s for heuristic + DB ops
+                print(f"[Scan] Phase 2: AI scoring {len(new_lead_ids)} new leads (budget: {AI_TIME_BUDGET}s)...")
+
+                # Score each lead individually for reliable mapping
+                conn = db.get_conn()
+                for idx, (proto, lead_id) in enumerate(zip(new_protocols, new_lead_ids)):
+                    if ai_scorer._circuit_broken:
+                        print(f"[Scan] ⚠️  AI quota exhausted after {ai_scored} leads, rest stay heuristic")
+                        break
+
+                    elapsed = _time.time() - ai_start
+                    if elapsed > AI_TIME_BUDGET:
+                        print(f"[Scan] ⏱️  Time budget exceeded ({elapsed:.0f}s), scored {ai_scored} leads, rest stay heuristic")
+                        break
+
+                    if not proto:
+                        continue
+
+                    text = lead_hunter.format_defillama_for_scoring(proto)
+                    result = ai_scorer.score_lead(text, source="DeFiLlama")
+
+                    if not result:
+                        continue
+
+                    # Update lead in DB with AI scores
+                    updates = {}
+                    for key in ["score", "priority", "summary", "audit_status",
+                                "funding", "tech", "category"]:
+                        if key in result:
+                            updates[key] = result[key]
+
+                    if "score_breakdown" in result:
+                        updates["score_breakdown"] = json.dumps(result["score_breakdown"], ensure_ascii=False)
+                    if "pitch_services" in result:
+                        services = result["pitch_services"]
+                        updates["pitch_services"] = ", ".join(services) if isinstance(services, list) else services
+
+                    updates["scored_by"] = f"ai:{ai_scorer.provider}"
+
+                    if updates:
+                        fields = [f"{k} = ?" for k in updates]
+                        fields.append("updated_at = datetime('now')")
+                        params = list(updates.values()) + [lead_id]
+                        conn.execute(
+                            f"UPDATE leads SET {', '.join(fields)} WHERE id = ?",
+                            params
+                        )
+                        conn.commit()
+                        ai_scored += 1
+
+                if ai_scored > 0:
+                    mode = f"ai:{ai_scorer.provider}"
+                    # Recount priorities after AI scoring
+                    hot = warm = 0
+                    for lid in new_lead_ids:
+                        row = conn.execute("SELECT score FROM leads WHERE id = ?", (lid,)).fetchone()
+                        if row:
+                            s = row[0] if isinstance(row, (list, tuple)) else row["score"]
+                            if s >= 75:
+                                hot += 1
+                            elif s >= 55:
+                                warm += 1
+                    print(f"[Scan] ✅ AI scored {ai_scored}/{len(new_lead_ids)} leads")
+            else:
+                print("[Scan] ⚠️  No AI key configured, using heuristic only")
+        except ImportError:
+            print("[Scan] ⚠️  ai_scorer not available, using heuristic only")
+        except Exception as e:
+            print(f"[Scan] ⚠️  AI scoring failed: {e}, heuristic scores retained")
+
+        summary = f"Found {len(protocols)} protocols, pushed {pushed} ({mode})"
+        if ai_scored > 0:
+            summary += f", AI scored {ai_scored}"
+        db.complete_scan_log(log_id, pushed, hot, warm, summary)
+        return {"pushed": pushed, "hot": hot, "warm": warm, "total_found": len(protocols),
+                "mode": mode, "ai_scored": ai_scored}
     except Exception as e:
         import traceback
         traceback.print_exc()

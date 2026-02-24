@@ -394,48 +394,98 @@ def _search_audit_web(name: str) -> dict:
 # ================================================================
 
 def _check_website_audits(website_url: str) -> dict:
-    """Check protocol website for audit PDF links."""
+    """Check protocol website, base domain, and docs subdomain for audit info."""
     if not website_url:
         return {"found": False}
 
     website_url = website_url.rstrip("/")
     ua = {"User-Agent": "LeadHunter/1.0"}
 
-    try:
-        resp = requests.get(website_url, timeout=8, allow_redirects=True, headers=ua)
-        if resp.status_code == 200:
-            text = resp.text.lower()
-            pdf_links = re.findall(r'href=["\']([^"\']*audit[^"\']*\.pdf)', text, re.IGNORECASE)
+    def _scan_page_for_audit(url):
+        """Scan a single page for audit PDFs and auditor names."""
+        try:
+            resp = requests.get(url, timeout=8, allow_redirects=True, headers=ua)
+            if resp.status_code != 200:
+                return None
+            text = resp.text
+
+            # Check for direct audit PDF links
+            pdf_links = re.findall(r'href=["\']([^"\']*audit[^"\']*\.pdf)', text, re.I)
             if pdf_links:
                 link = pdf_links[0]
                 if not link.startswith("http"):
-                    link = website_url + "/" + link.lstrip("/")
+                    link = url.rstrip("/") + "/" + link.lstrip("/")
                 return {
                     "found": True,
                     "source": "Website (PDF)",
-                    "auditor": _extract_auditor(link) or "See report",
+                    "auditor": _extract_auditor(link) or _extract_auditor(text) or "See report",
                     "links": [link],
                 }
-    except Exception:
-        pass
 
+            # Check for auditor mentions with audit context
+            if "audit" in text.lower() and ("report" in text.lower() or ".pdf" in text.lower()):
+                found_auditor = _extract_auditor(text)
+                if found_auditor:
+                    return {
+                        "found": True,
+                        "source": "Website",
+                        "auditor": found_auditor,
+                        "links": [url],
+                    }
+
+            return None
+        except Exception:
+            return None
+
+    # Step 1: Check the main website URL
+    result = _scan_page_for_audit(website_url)
+    if result:
+        return result
+
+    # Step 2: Check common audit paths on the main URL
     for path in ["/security", "/audits", "/audit"]:
+        result = _scan_page_for_audit(website_url + path)
+        if result:
+            result["source"] = f"Website ({path})"
+            return result
+
+    # Step 3: Derive base domain and check it + docs subdomain
+    parsed = urllib.parse.urlparse(website_url)
+    hostname = parsed.hostname or ""
+    if hostname.startswith("app."):
+        base_domain = hostname[4:]
+    else:
+        base_domain = ""
+
+    if base_domain:
+        base_url = f"https://{base_domain}"
+
+        # Check base domain root for audit links
         try:
-            url = website_url + path
-            resp = requests.get(url, timeout=6, allow_redirects=True, headers=ua)
+            resp = requests.get(base_url, timeout=8, allow_redirects=True, headers=ua)
             if resp.status_code == 200:
-                text = resp.text.lower()
-                if "audit" in text and ("report" in text or ".pdf" in text):
-                    found_auditor = _extract_auditor(text)
-                    if found_auditor:
-                        return {
-                            "found": True,
-                            "source": f"Website ({path})",
-                            "auditor": found_auditor,
-                            "links": [url],
-                        }
+                # Look for links pointing to docs audit pages
+                audit_page_links = re.findall(
+                    r'href=["\']((https?://[^"\']*)?/[^"\']*audit[^"\']*)',
+                    resp.text, re.I
+                )
+                for link_match in audit_page_links:
+                    link = link_match[0]
+                    if not link.startswith("http"):
+                        link = base_url + link
+                    # Follow the linked audit page
+                    result = _scan_page_for_audit(link)
+                    if result:
+                        return result
         except Exception:
             pass
+
+        # Check docs.{basedomain} + common paths
+        docs_url = f"https://docs.{base_domain}"
+        for path in ["", "/security/audits", "/audits", "/main/security/audits"]:
+            result = _scan_page_for_audit(docs_url + path)
+            if result:
+                return result
 
     return {"found": False}
 

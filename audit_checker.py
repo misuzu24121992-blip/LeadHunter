@@ -404,7 +404,7 @@ def _check_website_audits(website_url: str) -> dict:
     def _scan_page_for_audit(url):
         """Scan a single page for audit PDFs and auditor names."""
         try:
-            resp = requests.get(url, timeout=8, allow_redirects=True, headers=ua)
+            resp = requests.get(url, timeout=4, allow_redirects=True, headers=ua)
             if resp.status_code != 200:
                 return None
             text = resp.text
@@ -467,7 +467,7 @@ def _check_website_audits(website_url: str) -> dict:
         # Check base domain root for audit links (only if different from main URL)
         if base_url.rstrip("/") != website_url.split("#")[0].rstrip("/"):
             try:
-                resp = requests.get(base_url, timeout=8, allow_redirects=True, headers=ua)
+                resp = requests.get(base_url, timeout=4, allow_redirects=True, headers=ua)
                 if resp.status_code == 200:
                     # Look for links pointing to docs/audit pages
                     audit_page_links = re.findall(
@@ -486,8 +486,8 @@ def _check_website_audits(website_url: str) -> dict:
                 pass
 
         # Check doc.{domain}, docs.{domain} + common audit paths
-        audit_paths = ["/security/audits", "/audits", "/audit",
-                       "/main/security/audits", "/security", "/technical/audits"]
+        audit_paths = ["/security/audits", "/audits",
+                       "/main/security/audits"]
         for subdomain in ["docs", "doc"]:
             docs_url = f"https://{subdomain}.{base_domain}"
             # First check if subdomain exists at all
@@ -496,7 +496,7 @@ def _check_website_audits(website_url: str) -> dict:
                 return result
             # If it loaded (even without audit), try audit-specific paths
             try:
-                probe = requests.get(docs_url, timeout=5, allow_redirects=True, headers=ua)
+                probe = requests.get(docs_url, timeout=3, allow_redirects=True, headers=ua)
                 if probe.status_code == 200:
                     for path in audit_paths:
                         result = _scan_page_for_audit(docs_url + path)

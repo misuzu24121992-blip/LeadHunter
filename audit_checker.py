@@ -5,11 +5,13 @@ Multi-source audit detection for DeFi protocols.
 Audit Check Pipeline:
 1. DeFiLlama data (audits + audit_links fields)
 2. GitHub repository audit folders (LOCAL only — skipped on Vercel)
-3. Web search via DuckDuckGo (works on both local + Vercel)
+3. Google search for audit reports (works everywhere)
+4. Protocol website + homepage PDF scan (fallback)
 """
 
 import re
 import time
+import urllib.parse
 import requests
 import config
 import os
@@ -85,7 +87,6 @@ def _check_github_audits(github_url: str) -> dict:
 
     headers = _gh_headers()
 
-    # Parse GitHub URL
     repo_match = re.search(r"github\.com/([^/]+/[^/]+)", github_url)
     org_match = re.search(r"github\.com/([^/]+)$", github_url)
 
@@ -113,7 +114,7 @@ def _check_github_audits(github_url: str) -> dict:
                     if repo_result.get("found"):
                         return repo_result
                     time.sleep(0.1)
-                break  # Don't try "users" if "orgs" worked
+                break
         except Exception:
             pass
 
@@ -121,25 +122,27 @@ def _check_github_audits(github_url: str) -> dict:
 
 
 # ================================================================
-#  Web Search Audit Check (DuckDuckGo — works everywhere)
+#  Google Search Audit Check
 # ================================================================
 
-def _search_audit_web(name: str) -> dict:
+def _search_audit_google(name: str) -> dict:
     """
-    Search for audit reports via DuckDuckGo HTML.
-    Queries: "{name} audit report", "{name} smart contract audit"
+    Search Google for audit reports.
+    Parses result URLs and checks for known auditor names.
     """
     queries = [
         f'"{name}" audit report',
         f'"{name}" smart contract audit',
     ]
 
+    ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
     for query in queries:
         try:
             resp = requests.get(
-                "https://html.duckduckgo.com/html/",
-                params={"q": query},
-                headers={"User-Agent": "LeadHunter/1.0"},
+                "https://www.google.com/search",
+                params={"q": query, "num": 5},
+                headers={"User-Agent": ua},
                 timeout=10,
             )
             if resp.status_code != 200:
@@ -147,51 +150,96 @@ def _search_audit_web(name: str) -> dict:
 
             text = resp.text.lower()
 
-            # Look for known auditor mentions in search results
+            # Extract URLs from Google results
+            raw_urls = re.findall(r'/url\?q=(https?://[^&"]+)', resp.text)
+            urls = [urllib.parse.unquote(u) for u in raw_urls
+                    if "google" not in u and "youtube" not in u]
+
+            # Check for known auditors in page text
             auditor = _extract_auditor(text)
 
-            # Look for audit-related result links
-            # DuckDuckGo HTML results have links in <a class="result__a" href="...">
-            audit_links = re.findall(
-                r'href="([^"]*(?:audit|security)[^"]*\.pdf)"',
-                text, re.IGNORECASE
-            )
-
             if auditor:
-                # Extract a result URL with the auditor name
-                link_pattern = rf'href="(https?://[^"]*{re.escape(auditor.lower().split()[0])}[^"]*)"'
-                specific_links = re.findall(link_pattern, text, re.IGNORECASE)
-                best_link = specific_links[0] if specific_links else (audit_links[0] if audit_links else "")
+                # Find a URL related to the auditor
+                best_link = ""
+                auditor_key = auditor.lower().split()[0]
+                for u in urls:
+                    if auditor_key in u.lower() or "audit" in u.lower():
+                        best_link = u
+                        break
+                if not best_link and urls:
+                    best_link = urls[0]
 
                 return {
                     "found": True,
-                    "source": "Web Search",
+                    "source": "Google Search",
                     "auditor": auditor,
                     "links": [best_link] if best_link else [],
                 }
 
-            # Check for generic audit mentions in results
-            if audit_links:
+            # Check for audit PDF links
+            pdf_urls = [u for u in urls if "audit" in u.lower() and u.endswith(".pdf")]
+            if pdf_urls:
                 return {
                     "found": True,
-                    "source": "Web Search",
-                    "auditor": "See report",
-                    "links": audit_links[:2],
+                    "source": "Google Search",
+                    "auditor": _extract_auditor(pdf_urls[0]) or "See report",
+                    "links": pdf_urls[:2],
                 }
 
-            # Check if results mention audit + report patterns
-            if "audit report" in text and name.lower() in text:
-                # Extract any meaningful URL
-                urls = re.findall(r'href="(https?://[^"]*audit[^"]*)"', text, re.IGNORECASE)
-                if urls:
-                    return {
-                        "found": True,
-                        "source": "Web Search",
-                        "auditor": "See search results",
-                        "links": urls[:2],
-                    }
+            time.sleep(1)  # Rate limit between queries
+        except Exception:
+            pass
 
-            time.sleep(0.5)  # Rate limit between queries
+    return {"found": False}
+
+
+# ================================================================
+#  Website Fallback Check
+# ================================================================
+
+def _check_website_audits(website_url: str) -> dict:
+    """Check protocol website homepage for audit PDF links."""
+    if not website_url:
+        return {"found": False}
+
+    website_url = website_url.rstrip("/")
+    ua = {"User-Agent": "LeadHunter/1.0"}
+
+    # Check homepage for audit PDF links
+    try:
+        resp = requests.get(website_url, timeout=8, allow_redirects=True, headers=ua)
+        if resp.status_code == 200:
+            text = resp.text.lower()
+            pdf_links = re.findall(r'href=["\']([^"\']*audit[^"\']*\.pdf)', text, re.IGNORECASE)
+            if pdf_links:
+                link = pdf_links[0]
+                if not link.startswith("http"):
+                    link = website_url + "/" + link.lstrip("/")
+                return {
+                    "found": True,
+                    "source": "Website (PDF)",
+                    "auditor": _extract_auditor(link) or "See report",
+                    "links": [link],
+                }
+    except Exception:
+        pass
+
+    # Check common audit page paths
+    for path in ["/security", "/audits", "/audit"]:
+        try:
+            url = website_url + path
+            resp = requests.get(url, timeout=6, allow_redirects=True, headers=ua)
+            if resp.status_code == 200:
+                text = resp.text.lower()
+                if "audit" in text and ("report" in text or ".pdf" in text):
+                    found_auditor = _extract_auditor(text)
+                    if found_auditor:
+                        return {
+                            "found": True,
+                            "source": f"Website ({path})",
+                            "auditor": found_auditor,
+                            "links": [url],
+                        }
         except Exception:
             pass
 
@@ -209,12 +257,14 @@ def check_audit(protocol: dict) -> dict:
     Pipeline:
     1. DeFiLlama data
     2. GitHub audit folders (LOCAL only, skipped on Vercel)
-    3. Web search (DuckDuckGo — works everywhere)
+    3. Google search
+    4. Website homepage PDF check (fallback)
     """
     name = protocol.get("name") or "Unknown"
     audits = protocol.get("audits") or "0"
     audit_links = protocol.get("audit_links") or []
     github_raw = protocol.get("github") or []
+    website = protocol.get("url") or ""
 
     is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_URL"))
 
@@ -260,24 +310,42 @@ def check_audit(protocol: dict) -> dict:
             }
         print("❌", end=" ", flush=True)
 
-    # ── Source 3: Web search (works on both local + Vercel) ──
-    print(f"  [Audit] 🔍 {name}: Web search...", end=" ", flush=True)
-    search_result = _search_audit_web(name)
+    # ── Source 3: Google search ──
+    print(f"  [Audit] 🔍 {name}: Google...", end=" ", flush=True)
+    search_result = _search_audit_google(name)
     if search_result.get("found"):
         links = search_result.get("links", [])
         auditor = search_result.get("auditor", "")
         print(f"✅ {auditor}")
         return {
             "has_audit": True,
-            "audit_status": f"✅ Audited by {auditor} — Web: {', '.join(links[:2])}",
-            "audit_source": "Web Search",
+            "audit_status": f"✅ Audited by {auditor} — found via search: {', '.join(links[:2])}",
+            "audit_source": "Google",
             "audit_links": links,
         }
-    print("❌")
+    print("❌", end=" ", flush=True)
+
+    # ── Source 4: Website fallback ──
+    if website:
+        print(f"Website...", end=" ", flush=True)
+        web_result = _check_website_audits(website)
+        if web_result.get("found"):
+            links = web_result.get("links", [])
+            auditor = web_result.get("auditor", "")
+            print(f"✅ {auditor}")
+            return {
+                "has_audit": True,
+                "audit_status": f"✅ Audited by {auditor} — {', '.join(links[:2])}",
+                "audit_source": "Website",
+                "audit_links": links,
+            }
+        print("❌")
+    else:
+        print("")
 
     return {
         "has_audit": False,
-        "audit_status": "❌ No audit found (checked DeFiLlama, GitHub, web search)",
+        "audit_status": "❌ No audit found (checked DeFiLlama, GitHub, Google, website)",
         "audit_source": "none",
         "audit_links": [],
     }

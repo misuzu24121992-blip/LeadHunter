@@ -626,12 +626,13 @@ def _run_rescore():
             print(f"  [{updated}/{len(leads)}] {name}: {scored['score']}pts ({scored['priority']}) — {scored['audit_status'][:60]}")
 
         result = {"updated": updated, "total": len(leads)}
-        db.end_scan_log(log_id, "success", result)
+        import json as _json
+        db.complete_scan_log(log_id, leads_found=updated, details=_json.dumps(result))
         print(f"[Re-score] ✅ Updated {updated}/{len(leads)} leads")
         return result
 
     except Exception as e:
-        db.end_scan_log(log_id, "error", {"error": str(e)})
+        db.fail_scan_log(log_id, str(e))
         raise
 
 

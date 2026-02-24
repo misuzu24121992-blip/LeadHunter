@@ -4,14 +4,16 @@ Multi-source audit detection for DeFi protocols.
 
 Audit Check Pipeline:
 1. DeFiLlama data (audits + audit_links fields)
-2. GitHub repository audit folders (LOCAL only — skipped on Vercel)
-3. DuckDuckGo Lite search (works everywhere, no CAPTCHA)
+2. GitHub audit folders + README scan (LOCAL only — skipped on Vercel)
+3. DuckDuckGo Lite search (rate-limited but works with backoff)
 4. Protocol website + homepage PDF scan (fallback)
 """
 
 import re
 import time
+import random
 import urllib.parse
+import base64
 import requests
 import config
 import os
@@ -33,7 +35,6 @@ _KNOWN_AUDITORS = [
     "ackee",
 ]
 
-# Domains/patterns that indicate an audit URL
 _AUDIT_URL_PATTERNS = [
     "trustblock.run/audit",
     "sherlock-audit",
@@ -43,6 +44,14 @@ _AUDIT_URL_PATTERNS = [
     "/audits/",
     "/audit/",
     "/security-audit",
+]
+
+_USER_AGENTS = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
 ]
 
 
@@ -75,7 +84,7 @@ def _gh_headers():
 
 
 # ================================================================
-#  GitHub Audit Folder Check (LOCAL only)
+#  GitHub Audit Folder + README Check (LOCAL only)
 # ================================================================
 
 def _check_repo_audit_folders(repo_path: str, headers: dict) -> dict:
@@ -110,8 +119,55 @@ def _check_repo_audit_folders(repo_path: str, headers: dict) -> dict:
     return {"found": False}
 
 
+def _check_repo_readme(repo_path: str, headers: dict) -> dict:
+    """Check a repo's README for audit mentions."""
+    try:
+        url = f"https://api.github.com/repos/{repo_path}/readme"
+        resp = requests.get(url, headers=headers, timeout=8)
+        if resp.status_code != 200:
+            return {"found": False}
+
+        content = base64.b64decode(resp.json().get("content", "")).decode("utf-8", errors="ignore")
+        content_lower = content.lower()
+
+        if "audit" not in content_lower:
+            return {"found": False}
+
+        # Extract auditor name from README text
+        auditor = _extract_auditor(content)
+
+        # Extract links near audit mentions
+        audit_links = []
+        # Find markdown links near "audit" keyword
+        for match in re.finditer(r'audit', content_lower):
+            start = max(0, match.start() - 200)
+            end = min(len(content), match.end() + 200)
+            context = content[start:end]
+            links = re.findall(r'\[([^\]]*)\]\((https?://[^)]+)\)', context)
+            for link_text, link_url in links:
+                if "audit" in link_text.lower() or "audit" in link_url.lower():
+                    audit_links.append(link_url)
+            # Also check for bare URLs
+            bare_urls = re.findall(r'(https?://\S+)', context)
+            for u in bare_urls:
+                if "audit" in u.lower() or _is_audit_url(u):
+                    audit_links.append(u.rstrip(").,"))
+
+        if auditor or audit_links:
+            return {
+                "found": True,
+                "source": "GitHub README",
+                "auditor": auditor or "See README",
+                "links": list(set(audit_links))[:3],
+            }
+
+    except Exception:
+        pass
+    return {"found": False}
+
+
 def _check_github_audits(github_url: str) -> dict:
-    """Check GitHub org/repo for audit folders."""
+    """Check GitHub org/repo for audit folders and README mentions."""
     if not github_url:
         return {"found": False}
 
@@ -122,16 +178,21 @@ def _check_github_audits(github_url: str) -> dict:
 
     if repo_match:
         repo_path = repo_match.group(1).rstrip("/")
+        # Check audit folders
         result = _check_repo_audit_folders(repo_path, headers)
         if result.get("found"):
             return result
+        # Check README
+        readme_result = _check_repo_readme(repo_path, headers)
+        if readme_result.get("found"):
+            return readme_result
         org_name = repo_path.split("/")[0]
     elif org_match:
         org_name = org_match.group(1).rstrip("/")
     else:
         return {"found": False}
 
-    # Scan repos in org for audit folders
+    # Scan repos in org
     for endpoint in ["orgs", "users"]:
         try:
             url = f"https://api.github.com/{endpoint}/{org_name}/repos?per_page=30&sort=updated"
@@ -140,9 +201,21 @@ def _check_github_audits(github_url: str) -> dict:
                 repos = resp.json()
                 for r in repos:
                     rname = r.get("full_name", "")
-                    repo_result = _check_repo_audit_folders(rname, headers)
-                    if repo_result.get("found"):
-                        return repo_result
+                    rdesc = (r.get("description") or "").lower()
+                    rname_lower = r.get("name", "").lower()
+
+                    # Check repos with audit/security in name FIRST
+                    if "audit" in rname_lower or "security" in rname_lower:
+                        folder_result = _check_repo_audit_folders(rname, headers)
+                        if folder_result.get("found"):
+                            return folder_result
+
+                    # Check README of main/readme/docs repos
+                    if any(kw in rname_lower for kw in ["readme", "docs", "doc", "contracts", "protocol"]):
+                        readme_result = _check_repo_readme(rname, headers)
+                        if readme_result.get("found"):
+                            return readme_result
+
                     time.sleep(0.1)
                 break
         except Exception:
@@ -152,50 +225,60 @@ def _check_github_audits(github_url: str) -> dict:
 
 
 # ================================================================
-#  DuckDuckGo Lite Search (replaces broken Google search)
+#  DuckDuckGo Lite Search
 # ================================================================
 
 def _search_ddg_lite(query: str) -> list:
     """
-    Search using DuckDuckGo Lite — returns actual results with URLs.
-    Unlike Google and DDG HTML, DDG Lite does NOT block automated requests.
-    Returns list of {url, title, snippet} dicts.
+    Search using DuckDuckGo Lite.
+    Uses random UA and accepts both GET/POST to avoid CAPTCHA.
     """
-    try:
-        resp = requests.get(
-            "https://lite.duckduckgo.com/lite/",
-            params={"q": query},
-            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"},
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            return []
+    ua = random.choice(_USER_AGENTS)
 
-        results = []
+    for method in ["GET", "POST"]:
+        try:
+            if method == "GET":
+                resp = requests.get(
+                    "https://lite.duckduckgo.com/lite/",
+                    params={"q": query},
+                    headers={"User-Agent": ua, "Accept": "text/html", "Accept-Language": "en-US,en;q=0.5"},
+                    timeout=10,
+                )
+            else:
+                resp = requests.post(
+                    "https://lite.duckduckgo.com/lite/",
+                    data={"q": query},
+                    headers={"User-Agent": ua, "Accept": "text/html", "Accept-Language": "en-US,en;q=0.5"},
+                    timeout=10,
+                )
 
-        # DDG Lite format: <a rel="nofollow" href="//duckduckgo.com/l/?uddg=ENCODED_URL" class='result-link'>title</a>
-        link_matches = re.findall(
-            r'<a\s+rel="nofollow"\s+href="//duckduckgo\.com/l/\?uddg=(https?[^&"]+)[^"]*"\s+class=\'result-link\'>(.*?)</a>',
-            resp.text, re.DOTALL)
+            if resp.status_code not in (200, 202) or 'result-link' not in resp.text:
+                continue
 
-        # Snippets follow links
-        snippets = re.findall(r"class='result-snippet'>\s*(.*?)\s*</td>", resp.text, re.DOTALL)
+            results = []
+            link_matches = re.findall(
+                r'<a\s+rel="nofollow"\s+href="//duckduckgo\.com/l/\?uddg=(https?[^&"]+)[^"]*"\s+class=\'result-link\'>(.*?)</a>',
+                resp.text, re.DOTALL)
 
-        for i, (encoded_url, raw_title) in enumerate(link_matches):
-            url = urllib.parse.unquote(encoded_url)
-            title = re.sub(r'<[^>]+>', '', raw_title).strip()
-            snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
-            results.append({"url": url, "title": title, "snippet": snippet})
+            snippets = re.findall(r"class='result-snippet'>\s*(.*?)\s*</td>", resp.text, re.DOTALL)
 
-        return results
-    except Exception:
-        return []
+            for i, (encoded_url, raw_title) in enumerate(link_matches):
+                url = urllib.parse.unquote(encoded_url)
+                title = re.sub(r'<[^>]+>', '', raw_title).strip()
+                snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
+                results.append({"url": url, "title": title, "snippet": snippet})
+
+            if results:
+                return results
+        except Exception:
+            pass
+
+    return []
 
 
 def _search_audit_web(name: str) -> dict:
     """
     Search for audit reports using DuckDuckGo Lite.
-    Checks result titles, snippets, and URLs for known auditors and audit patterns.
     """
     queries = [
         f'"{name}" audit report',
@@ -206,25 +289,19 @@ def _search_audit_web(name: str) -> dict:
         results = _search_ddg_lite(query)
 
         if not results:
-            time.sleep(0.5)
+            time.sleep(random.uniform(2, 4))
             continue
 
-        # Combine all text from results for auditor matching
+        # Combine all text from results
         all_text = " ".join(
             f"{r['title']} {r['snippet']} {r['url']}" for r in results
         )
 
-        # Check for known auditors in combined text
         auditor = _extract_auditor(all_text)
-
-        # Check for audit URLs in results
         audit_urls = [r["url"] for r in results if _is_audit_url(r["url"])]
-
-        # Check for PDF audit links
         pdf_urls = [r["url"] for r in results
                     if r["url"].lower().endswith(".pdf") and "audit" in r["url"].lower()]
 
-        # If we found an auditor name, report it
         if auditor:
             best_link = ""
             auditor_key = auditor.lower().split()[0]
@@ -236,7 +313,6 @@ def _search_audit_web(name: str) -> dict:
                 best_link = audit_urls[0]
             if not best_link and results:
                 best_link = results[0]["url"]
-
             return {
                 "found": True,
                 "source": "Web Search",
@@ -244,9 +320,8 @@ def _search_audit_web(name: str) -> dict:
                 "links": [best_link] if best_link else [],
             }
 
-        # If we found audit URLs but no named auditor
         if audit_urls:
-            # Try to extract auditor from the URL or page title
+            auditor = ""
             for au in audit_urls:
                 a = _extract_auditor(au)
                 if a:
@@ -259,8 +334,8 @@ def _search_audit_web(name: str) -> dict:
                 "links": audit_urls[:2],
             }
 
-        # If we found audit PDFs
         if pdf_urls:
+            auditor = ""
             for pu in pdf_urls:
                 a = _extract_auditor(pu)
                 if a:
@@ -273,9 +348,8 @@ def _search_audit_web(name: str) -> dict:
                 "links": pdf_urls[:2],
             }
 
-        # Check snippets for audit mentions with links
+        # Check titles for audit-related keywords
         for r in results:
-            snippet_lower = r["snippet"].lower()
             title_lower = r["title"].lower()
             if ("audit" in title_lower and ("report" in title_lower or "review" in title_lower or "security" in title_lower)):
                 a = _extract_auditor(r["snippet"] + " " + r["title"])
@@ -286,7 +360,7 @@ def _search_audit_web(name: str) -> dict:
                     "links": [r["url"]],
                 }
 
-        time.sleep(0.5)
+        time.sleep(random.uniform(2, 4))
 
     return {"found": False}
 
@@ -296,7 +370,7 @@ def _search_audit_web(name: str) -> dict:
 # ================================================================
 
 def _check_website_audits(website_url: str) -> dict:
-    """Check protocol website homepage for audit PDF links."""
+    """Check protocol website for audit PDF links."""
     if not website_url:
         return {"found": False}
 
@@ -352,8 +426,8 @@ def check_audit(protocol: dict) -> dict:
 
     Pipeline:
     1. DeFiLlama data
-    2. GitHub audit folders (LOCAL only, skipped on Vercel)
-    3. DuckDuckGo Lite search (works everywhere)
+    2. GitHub audit folders + README (LOCAL only, skipped on Vercel)
+    3. DuckDuckGo Lite search (works with rate limiting)
     4. Website homepage PDF check (fallback)
     """
     name = protocol.get("name") or "Unknown"
@@ -390,18 +464,19 @@ def check_audit(protocol: dict) -> dict:
             "audit_links": [],
         }
 
-    # ── Source 2: GitHub audit folders (LOCAL only) ──
+    # ── Source 2: GitHub audit folders + README (LOCAL only) ──
     if not is_vercel and github_url:
         print(f"  [Audit] 🔍 {name}: GitHub...", end=" ", flush=True)
         gh_result = _check_github_audits(github_url)
         if gh_result.get("found"):
             links = gh_result.get("links", [])
             auditor = gh_result.get("auditor", "")
-            print(f"✅ {auditor}")
+            src = gh_result.get("source", "GitHub")
+            print(f"✅ {auditor} ({src})")
             return {
                 "has_audit": True,
-                "audit_status": f"✅ Audited by {auditor} — GitHub: {', '.join(links[:2])}",
-                "audit_source": "GitHub",
+                "audit_status": f"✅ Audited by {auditor} — {src}: {', '.join(links[:2])}",
+                "audit_source": src,
                 "audit_links": links,
             }
         print("❌", end=" ", flush=True)
@@ -441,7 +516,7 @@ def check_audit(protocol: dict) -> dict:
 
     return {
         "has_audit": False,
-        "audit_status": "❌ No audit found (checked DeFiLlama, GitHub, web search, website)",
+        "audit_status": "❌ No audit found (checked DeFiLlama, GitHub, DDG, website)",
         "audit_source": "none",
         "audit_links": [],
     }

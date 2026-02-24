@@ -17,22 +17,28 @@ import config
 import os
 
 _KNOWN_AUDITORS = [
-    "certik", "mixbytes", "ackee", "nethermind", "openzeppelin",
+    # Longer/more specific names first
     "trail of bits", "trail_of_bits", "trailofbits",
-    "sherlock", "quantstamp", "consensys", "consensys diligence",
+    "consensys diligence", "thesis defense", "thesis_defense",
+    "least authority", "oak security",
+    "openzeppelin", "chainsecurity",
+    "certik", "mixbytes", "nethermind",
+    "sherlock", "quantstamp", "consensys",
     "halborn", "peckshield", "slowmist", "solidproof", "movebit",
-    "hacken", "thesis defense", "thesis_defense",
-    "spearbit", "code4rena", "zellic", "least authority",
-    "chainsecurity", "cyfrin", "immunefi", "oak security",
-    "csc", "ottersec", "veridise",
+    "hacken", "spearbit", "code4rena", "zellic",
+    "cyfrin", "immunefi", "ottersec", "veridise",
+    "ackee blockchain", "ackee",
 ]
 
 
 def _extract_auditor(text: str) -> str:
-    """Try to extract a known auditor name from text."""
+    """Try to extract a known auditor name from text using word boundaries."""
     text_lower = text.lower()
     for auditor in _KNOWN_AUDITORS:
-        if auditor in text_lower:
+        # Use word boundary matching to avoid false positives
+        # e.g. "csc" matching "discuss"
+        pattern = r'\b' + re.escape(auditor) + r'\b'
+        if re.search(pattern, text_lower):
             return auditor.replace("_", " ").title()
     return ""
 

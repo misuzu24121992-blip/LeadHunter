@@ -511,21 +511,25 @@ def _check_website_audits(website_url: str) -> dict:
 #  Main Audit Check Pipeline
 # ================================================================
 
-def check_audit(protocol: dict) -> dict:
+def check_audit(protocol: dict, mode: str = "auto") -> dict:
     """
     Run multi-source audit check for a protocol.
 
-    Pipeline (identical on all environments):
-    1. DeFiLlama data
-    2. GitHub audit folders + README
-    3. DuckDuckGo Lite search (with delays)
-    4. Website + docs subdomain check (fallback)
+    Modes:
+      'full'  — DeFiLlama → GitHub → DDG (3s delay) → Website + docs subdomains
+      'fast'  — DeFiLlama → GitHub → Website only (no DDG, no docs probing)
+      'auto'  — 'fast' on Vercel, 'full' on local
     """
     name = protocol.get("name") or "Unknown"
     audits = protocol.get("audits") or "0"
     audit_links = protocol.get("audit_links") or []
     github_raw = protocol.get("github") or []
     website = protocol.get("url") or ""
+
+    # Resolve auto mode
+    if mode == "auto":
+        is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_URL"))
+        mode = "fast" if is_vercel else "full"
 
 
     # Build GitHub URL
@@ -571,20 +575,21 @@ def check_audit(protocol: dict) -> dict:
             }
         print("❌", end=" ", flush=True)
 
-    # ── Source 3: DuckDuckGo Lite search ──
-    print(f"  [Audit] 🔍 {name}: DDG search...", end=" ", flush=True)
-    search_result = _search_audit_web(name)
-    if search_result.get("found"):
-        links = search_result.get("links", [])
-        auditor = search_result.get("auditor", "")
-        print(f"✅ {auditor}")
-        return {
-            "has_audit": True,
-            "audit_status": f"✅ Audited by {auditor} — {', '.join(links[:2])}",
-            "audit_source": "Web Search",
-            "audit_links": links,
-        }
-    print("❌", end=" ", flush=True)
+    # ── Source 3: DuckDuckGo Lite search (FULL mode only) ──
+    if mode == "full":
+        print(f"  [Audit] 🔍 {name}: DDG search...", end=" ", flush=True)
+        search_result = _search_audit_web(name)
+        if search_result.get("found"):
+            links = search_result.get("links", [])
+            auditor = search_result.get("auditor", "")
+            print(f"✅ {auditor}")
+            return {
+                "has_audit": True,
+                "audit_status": f"✅ Audited by {auditor} — {', '.join(links[:2])}",
+                "audit_source": "Web Search",
+                "audit_links": links,
+            }
+        print("❌", end=" ", flush=True)
 
     # ── Source 4: Website fallback ──
     if website:
@@ -604,9 +609,10 @@ def check_audit(protocol: dict) -> dict:
     else:
         print("")
 
+    checked = "DeFiLlama, GitHub, DDG, website" if mode == "full" else "DeFiLlama, GitHub, website"
     return {
         "has_audit": False,
-        "audit_status": "❌ No audit found (checked DeFiLlama, GitHub, DDG, website)",
+        "audit_status": f"❌ No audit found (checked {checked})",
         "audit_source": "none",
         "audit_links": [],
     }

@@ -644,6 +644,46 @@ def _run_rescore():
         raise
 
 
+# ---- SYNC (Local → Vercel) ----
+@app.post("/api/sync-leads")
+async def sync_leads(payload: dict):
+    """Accept leads from local scan and upsert into Vercel DB."""
+    leads = payload.get("leads", [])
+    if not leads:
+        return {"ok": False, "error": "No leads provided"}
+
+    synced = 0
+    existing = [n.lower() for n in db.get_lead_names()]
+
+    for lead in leads:
+        name = lead.get("name", "")
+        if not name:
+            continue
+
+        if name.lower() in existing:
+            # Update existing lead
+            lead_id = lead.get("id")
+            if lead_id:
+                db.update_lead(lead_id, {
+                    "score": lead.get("score", 0),
+                    "priority": lead.get("priority", "MONITOR"),
+                    "audit_status": lead.get("audit_status", ""),
+                    "score_breakdown": lead.get("score_breakdown", "{}"),
+                    "scored_by": lead.get("scored_by", "ai:antigravity"),
+                    "summary": lead.get("summary", ""),
+                    "pitch_services": lead.get("pitch_services", "[]"),
+                })
+                synced += 1
+        else:
+            # Insert new lead
+            lead_id = db.insert_lead(lead)
+            if lead_id:
+                synced += 1
+                existing.append(name.lower())
+
+    return {"ok": True, "synced": synced, "total": len(leads)}
+
+
 # ---- RESET ----
 @app.post("/api/reset-db")
 async def reset_db():

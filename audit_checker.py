@@ -282,17 +282,21 @@ def _search_ddg_lite(query: str) -> list:
 def _search_audit_web(name: str) -> dict:
     """
     Search for audit reports using DuckDuckGo Lite.
+    Skipped on Vercel (rate-limited from serverless IPs).
     """
+    is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_URL"))
+    if is_vercel:
+        return {"found": False}
+
     queries = [
         f'"{name}" audit report',
-        f'"{name}" smart contract audit',
     ]
 
     for query in queries:
         results = _search_ddg_lite(query)
 
         if not results:
-            time.sleep(random.uniform(2, 4))
+            time.sleep(1)
             continue
 
         # Combine all text from results
@@ -363,7 +367,7 @@ def _search_audit_web(name: str) -> dict:
                     "links": [r["url"]],
                 }
 
-        time.sleep(random.uniform(2, 4))
+        time.sleep(1)
 
     return {"found": False}
 

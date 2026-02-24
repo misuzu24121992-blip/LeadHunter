@@ -49,32 +49,31 @@ def _antigravity_score(protocol: dict) -> dict:
     breakdown = {}
 
     # 1. Audit Need (max 25)
-    # DeFiLlama audit data covers ~50% of protocols.
-    # audits="0" does NOT mean unaudited — only that DeFiLlama has no record.
+    # Uses multi-source audit check results (set by _run_lead_scan)
+    audit_result = protocol.get("_audit_result") or {}
+    has_audit = audit_result.get("has_audit", False)
+
     if is_non_protocol:
         audit_pts = 2
         audit_reason = "Non-protocol token (RWA/stock) — audit not applicable"
-    elif audits != "0" and audit_links:
+    elif has_audit:
         audit_pts = 3
-        audit_reason = f"Audited ({len(audit_links)} report(s) on DeFiLlama)"
-    elif audits != "0":
-        audit_pts = 5
-        audit_reason = "DeFiLlama reports audit exists"
+        audit_source = audit_result.get("audit_source", "")
+        audit_reason = f"Audited (found via {audit_source})"
     else:
-        # DeFiLlama has no audit data — could be audited or not
-        # Use moderate score; manual /score-leads verification recommended
+        # Checked DeFiLlama, GitHub, website, docs — no audit found
         if tvl > 1_000_000:
-            audit_pts = 15
-            audit_reason = f"Audit unverified (DeFiLlama has no data). TVL ${tvl:,.0f} — needs manual check"
+            audit_pts = 22
+            audit_reason = f"No audit found (checked all sources). TVL ${tvl:,.0f} — strong opportunity"
         elif tvl > 100_000:
-            audit_pts = 12
-            audit_reason = f"Audit unverified. TVL ${tvl:,.0f} — needs manual check"
+            audit_pts = 18
+            audit_reason = f"No audit found (checked all sources). TVL ${tvl:,.0f}"
         elif tvl > 10_000:
-            audit_pts = 8
-            audit_reason = f"Audit unverified. TVL ${tvl:,.0f}"
+            audit_pts = 12
+            audit_reason = f"No audit found. TVL ${tvl:,.0f}"
         else:
-            audit_pts = 4
-            audit_reason = f"Audit unverified. Negligible TVL (${tvl:,.0f})"
+            audit_pts = 5
+            audit_reason = f"No audit found. Negligible TVL (${tvl:,.0f})"
     breakdown["Audit Need"] = {"points": audit_pts, "max": 25, "reason": audit_reason}
 
     # 2. Funding & Budget (max 15) — TVL as proxy for budget capacity
@@ -194,8 +193,14 @@ def _antigravity_score(protocol: dict) -> dict:
     github_list = protocol.get("github") or []
     github_url = github_list[0] if isinstance(github_list, list) and github_list else (github_list if isinstance(github_list, str) else "")
 
-    # Audit status
-    audit_status = _classify_audit(protocol)
+    # Audit status from multi-source check
+    audit_result = protocol.get("_audit_result") or {}
+    if is_non_protocol:
+        audit_status = "N/A — Non-protocol RWA token"
+    elif audit_result.get("has_audit"):
+        audit_status = audit_result.get("audit_status", "✅ Audited")
+    else:
+        audit_status = audit_result.get("audit_status", "❌ No audit found")
 
     # Smart pitch services
     pitch = ["Smart Contract Audit"]
@@ -210,10 +215,10 @@ def _antigravity_score(protocol: dict) -> dict:
     desc_short = protocol.get("description") or "No description"
     if is_non_protocol:
         summary = f"{desc_short} TVL: ${tvl:,.0f}. Non-protocol RWA token — audit N/A."
-    elif audits != "0":
+    elif audit_result.get("has_audit"):
         summary = f"{desc_short} TVL: ${tvl:,.0f}. {audit_status}"
     else:
-        summary = f"{desc_short} TVL: ${tvl:,.0f}. Audit status unverified — needs manual check."
+        summary = f"{desc_short} TVL: ${tvl:,.0f}. No audit found — potential opportunity."
 
     return {
         "name": name,
@@ -254,10 +259,10 @@ def _classify_audit(protocol: dict) -> str:
 
 
 def _run_lead_scan():
-    """Run lead_hunter scan with heuristic scoring only.
-    After scan, run /score-leads for Antigravity deep analysis + audit verification."""
+    """Run lead scan with Antigravity auto-scoring + multi-source audit checks."""
     import lead_hunter
     import database as db
+    import audit_checker
 
     log_id = db.start_scan_log("lead_hunter")
     try:
@@ -267,9 +272,15 @@ def _run_lead_scan():
         # Enrich with audit data from DeFiLlama detail API
         protocols = lead_hunter.enrich_audit_from_defillama(protocols)
 
-        # Heuristic scoring — fast ingest, no API needed
+        # Run multi-source audit check for each protocol
+        print(f"[Scan] 🔍 Running audit checks for {len(protocols)} protocols...")
+        for protocol in protocols:
+            audit_result = audit_checker.check_audit(protocol)
+            protocol["_audit_result"] = audit_result
+
+        # Antigravity scoring using audit results
         scored = []
-        print(f"[Scan] Heuristic scoring {len(protocols)} protocols...")
+        print(f"[Scan] 🧠 Antigravity scoring {len(protocols)} protocols...")
         for protocol in protocols:
             scored.append(_antigravity_score(protocol))
 

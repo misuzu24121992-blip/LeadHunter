@@ -306,7 +306,7 @@ def _search_audit_web(name: str) -> dict:
         return {"found": False}
 
     queries = [
-        f'"{name}" audit report',
+        f'"{name}" audit',
     ]
 
     for query in queries:
@@ -452,40 +452,58 @@ def _check_website_audits(website_url: str) -> dict:
     # Step 3: Derive base domain and check it + docs subdomain
     parsed = urllib.parse.urlparse(website_url)
     hostname = parsed.hostname or ""
+
+    # Derive base domain: strip app./www. prefix
     if hostname.startswith("app."):
         base_domain = hostname[4:]
+    elif hostname.startswith("www."):
+        base_domain = hostname[4:]
     else:
-        base_domain = ""
+        base_domain = hostname  # use hostname as-is for docs check
 
     if base_domain:
         base_url = f"https://{base_domain}"
 
-        # Check base domain root for audit links
-        try:
-            resp = requests.get(base_url, timeout=8, allow_redirects=True, headers=ua)
-            if resp.status_code == 200:
-                # Look for links pointing to docs audit pages
-                audit_page_links = re.findall(
-                    r'href=["\']((https?://[^"\']*)?/[^"\']*audit[^"\']*)',
-                    resp.text, re.I
-                )
-                for link_match in audit_page_links:
-                    link = link_match[0]
-                    if not link.startswith("http"):
-                        link = base_url + link
-                    # Follow the linked audit page
-                    result = _scan_page_for_audit(link)
-                    if result:
-                        return result
-        except Exception:
-            pass
+        # Check base domain root for audit links (only if different from main URL)
+        if base_url.rstrip("/") != website_url.split("#")[0].rstrip("/"):
+            try:
+                resp = requests.get(base_url, timeout=8, allow_redirects=True, headers=ua)
+                if resp.status_code == 200:
+                    # Look for links pointing to docs/audit pages
+                    audit_page_links = re.findall(
+                        r'href=["\']((https?://[^"\']*)?/[^"\']*audit[^"\']*)',
+                        resp.text, re.I
+                    )
+                    for link_match in audit_page_links:
+                        link = link_match[0]
+                        if not link.startswith("http"):
+                            link = base_url + link
+                        # Follow the linked audit page
+                        result = _scan_page_for_audit(link)
+                        if result:
+                            return result
+            except Exception:
+                pass
 
-        # Check docs.{basedomain} + common paths
-        docs_url = f"https://docs.{base_domain}"
-        for path in ["", "/security/audits", "/audits", "/main/security/audits"]:
-            result = _scan_page_for_audit(docs_url + path)
+        # Check doc.{domain}, docs.{domain} + common audit paths
+        audit_paths = ["/security/audits", "/audits", "/audit",
+                       "/main/security/audits", "/security", "/technical/audits"]
+        for subdomain in ["docs", "doc"]:
+            docs_url = f"https://{subdomain}.{base_domain}"
+            # First check if subdomain exists at all
+            result = _scan_page_for_audit(docs_url)
             if result:
                 return result
+            # If it loaded (even without audit), try audit-specific paths
+            try:
+                probe = requests.get(docs_url, timeout=5, allow_redirects=True, headers=ua)
+                if probe.status_code == 200:
+                    for path in audit_paths:
+                        result = _scan_page_for_audit(docs_url + path)
+                        if result:
+                            return result
+            except Exception:
+                pass  # subdomain doesn't exist, skip
 
     return {"found": False}
 

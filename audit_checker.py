@@ -488,8 +488,8 @@ def check_audit(protocol: dict) -> dict:
             "audit_links": [],
         }
 
-    # ── Source 2: GitHub audit folders + README (LOCAL only) ──
-    if not is_vercel and github_url:
+    # ── Source 2: GitHub audit folders + README ──
+    if github_url:
         print(f"  [Audit] 🔍 {name}: GitHub...", end=" ", flush=True)
         gh_result = _check_github_audits(github_url)
         if gh_result.get("found"):

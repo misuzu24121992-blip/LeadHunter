@@ -67,6 +67,9 @@
                     <button class="btn btn-primary btn-glow" onclick="runScan('leads')">
                         <span class="btn-icon">🚀</span> Run Lead Scan
                     </button>
+                    <button class="btn btn-secondary" onclick="runScan('rescore')">
+                        <span class="btn-icon">🔄</span> Re-score
+                    </button>
                 </div>
             </div>
 
@@ -272,6 +275,12 @@
                     <h3>Incident Scan</h3>
                     <p>Rekt News + Alerts</p>
                     <button class="btn btn-danger btn-sm">Run Now</button>
+                </div>
+                <div class="scan-action-card" onclick="runScan('rescore')">
+                    <div class="scan-action-icon">🔄</div>
+                    <h3>Re-score Leads</h3>
+                    <p>Audit check + Score update</p>
+                    <button class="btn btn-secondary btn-sm">Run Now</button>
                 </div>
             </div>
 

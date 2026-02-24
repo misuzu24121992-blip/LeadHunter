@@ -272,7 +272,7 @@ def _run_lead_scan():
         # Enrich with audit data from DeFiLlama detail API
         protocols = lead_hunter.enrich_audit_from_defillama(protocols)
 
-        # Run multi-source audit check for each protocol
+        # Multi-source audit check (handles Vercel/local internally)
         print(f"[Scan] 🔍 Running audit checks for {len(protocols)} protocols...")
         for protocol in protocols:
             audit_result = audit_checker.check_audit(protocol)
@@ -283,6 +283,7 @@ def _run_lead_scan():
         print(f"[Scan] 🧠 Antigravity scoring {len(protocols)} protocols...")
         for protocol in protocols:
             scored.append(_antigravity_score(protocol))
+
 
         hot = warm = pushed = 0
         existing_lower = [n.lower() for n in existing]
@@ -546,6 +547,8 @@ async def run_scan(scan_type: str):
             result = _run_upgrade_scan()
         elif scan_type == "incidents":
             result = _run_incident_scan()
+        elif scan_type == "rescore":
+            result = _run_rescore()
         else:
             raise HTTPException(400, f"Unknown scan type: {scan_type}")
         return {"ok": True, "result": result}
@@ -555,6 +558,81 @@ async def run_scan(scan_type: str):
         raise HTTPException(500, str(e))
     finally:
         _scan_lock.release()
+
+
+def _run_rescore():
+    """Re-run audit checks and update scores for all existing leads."""
+    import database as db
+    import audit_checker
+    import lead_hunter
+
+    log_id = db.start_scan_log("rescore")
+    try:
+        leads = db.get_leads(limit=500)
+        print(f"[Re-score] 🔄 Re-scoring {len(leads)} leads with audit checks...")
+
+        # Fetch fresh bulk data from DeFiLlama for TVL, category etc.
+        try:
+            all_protocols = lead_hunter.fetch_defillama_new_protocols(days_back=365)
+            protocols_by_name = {p.get('name', '').lower(): p for p in all_protocols}
+        except Exception:
+            protocols_by_name = {}
+
+        updated = 0
+        for lead in leads:
+            lead_id = lead.get("id")
+            name = lead.get("name", "")
+            if not lead_id:
+                continue
+
+            # Build protocol dict from stored lead + fresh DeFiLlama data
+            bulk = protocols_by_name.get(name.lower(), {})
+            protocol = {
+                "name": name,
+                "tvl": bulk.get("tvl") or 0,
+                "category": lead.get("category") or bulk.get("category") or "",
+                "description": bulk.get("description") or lead.get("summary") or "",
+                "change_7d": bulk.get("change_7d") or 0,
+                "audits": bulk.get("audits") or "0",
+                "audit_links": bulk.get("audit_links") or [],
+                "forked_from": bulk.get("forkedFrom") or [],
+                "chains": bulk.get("chains") or [],
+                "github": bulk.get("github") or [],
+                "url": lead.get("website_url") or bulk.get("url") or "",
+                "slug": bulk.get("slug") or "",
+                "twitter": bulk.get("twitter") or "",
+                "listed_at": bulk.get("listedAt") or "",
+            }
+
+            # Run multi-source audit check
+            audit_result = audit_checker.check_audit(protocol)
+            protocol["_audit_result"] = audit_result
+
+            # Re-score
+            scored = _antigravity_score(protocol)
+
+            # Update in DB
+            import json
+            db.update_lead(lead_id, {
+                "score": scored["score"],
+                "priority": scored["priority"],
+                "audit_status": scored["audit_status"],
+                "score_breakdown": json.dumps(scored.get("score_breakdown", {})),
+                "scored_by": "ai:antigravity",
+                "summary": scored["summary"],
+                "pitch_services": json.dumps(scored.get("pitch_services", [])),
+            })
+            updated += 1
+            print(f"  [{updated}/{len(leads)}] {name}: {scored['score']}pts ({scored['priority']}) — {scored['audit_status'][:60]}")
+
+        result = {"updated": updated, "total": len(leads)}
+        db.end_scan_log(log_id, "success", result)
+        print(f"[Re-score] ✅ Updated {updated}/{len(leads)} leads")
+        return result
+
+    except Exception as e:
+        db.end_scan_log(log_id, "error", {"error": str(e)})
+        raise
 
 
 # ---- RESET ----

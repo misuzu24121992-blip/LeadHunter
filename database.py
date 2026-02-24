@@ -390,7 +390,9 @@ def get_leads(priority: str = None, stage: str = None, category: str = None,
 def update_lead(lead_id: int, updates: dict) -> bool:
     """Update a lead's fields."""
     conn = get_conn()
-    allowed = ["stage", "priority", "contact_notes", "follow_up_date", "category", "score"]
+    allowed = ["stage", "priority", "contact_notes", "follow_up_date", "category",
+               "score", "audit_status", "score_breakdown", "scored_by", "summary",
+               "pitch_services"]
     fields = []
     params = []
     for key in allowed:

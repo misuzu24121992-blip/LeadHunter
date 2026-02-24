@@ -700,7 +700,7 @@ async function loadIncidents() {
 //  Scan Triggers
 // ============================
 async function runScan(type) {
-    const labels = { leads: 'Lead Scan', upgrades: 'Upgrade Scan', incidents: 'Incident Scan' };
+    const labels = { leads: 'Lead Scan', upgrades: 'Upgrade Scan', incidents: 'Incident Scan', rescore: 'Re-score Leads' };
     const statusEl = document.getElementById('scan-status');
     statusEl.innerHTML = '<div class="status-dot status-running"></div><span>Scanning...</span>';
 

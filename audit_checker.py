@@ -93,6 +93,23 @@ def _check_repo_audit_folders(repo_path: str, headers: dict) -> dict:
     found_links = []
     auditor = ""
 
+    # First: check ROOT of repo for audit PDFs
+    try:
+        url = f"https://api.github.com/repos/{repo_path}/contents/"
+        resp = requests.get(url, headers=headers, timeout=8)
+        if resp.status_code == 200:
+            contents = resp.json()
+            if isinstance(contents, list):
+                for item in contents:
+                    name = (item.get("name") or "").lower()
+                    if name.endswith(".pdf") and "audit" in name:
+                        found_links.append(item.get("html_url", ""))
+                        if not auditor:
+                            auditor = _extract_auditor(name)
+    except Exception:
+        pass
+
+    # Then: check audit subdirectories
     for dirname in audit_dirs:
         try:
             url = f"https://api.github.com/repos/{repo_path}/contents/{dirname}"

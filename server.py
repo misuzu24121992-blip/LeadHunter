@@ -11,6 +11,7 @@ Usage:
 
 import os
 import json
+import time
 import threading
 from contextlib import asynccontextmanager
 
@@ -274,9 +275,12 @@ def _run_lead_scan():
 
         # Multi-source audit check (handles Vercel/local internally)
         print(f"[Scan] 🔍 Running audit checks for {len(protocols)} protocols...")
-        for protocol in protocols:
+        for i, protocol in enumerate(protocols):
             audit_result = audit_checker.check_audit(protocol)
             protocol["_audit_result"] = audit_result
+            # Delay between protocols to avoid rate limiting (accuracy > speed)
+            if i < len(protocols) - 1:
+                time.sleep(3)
 
         # Antigravity scoring using audit results
         scored = []
@@ -624,6 +628,10 @@ def _run_rescore():
             })
             updated += 1
             print(f"  [{updated}/{len(leads)}] {name}: {scored['score']}pts ({scored['priority']}) — {scored['audit_status'][:60]}")
+
+            # Delay between protocols to avoid rate limiting (accuracy > speed)
+            if updated < len(leads):
+                time.sleep(3)
 
         result = {"updated": updated, "total": len(leads)}
         import json as _json

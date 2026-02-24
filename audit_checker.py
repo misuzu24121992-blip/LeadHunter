@@ -2,11 +2,14 @@
 Verichains LeadHunter — Audit Checker Module
 Multi-source audit detection for DeFi protocols.
 
-Audit Check Pipeline:
+Audit Check Pipeline (identical on local + Vercel):
 1. DeFiLlama data (audits + audit_links fields)
-2. GitHub audit folders + README scan (LOCAL only — skipped on Vercel)
-3. DuckDuckGo Lite search (rate-limited but works with backoff)
-4. Protocol website + homepage PDF scan (fallback)
+2. GitHub audit folders + README scan (via REST API)
+3. DuckDuckGo Lite search (with 3s delay between queries)
+4. Protocol website + docs subdomain + PDF scan (fallback)
+
+Design: Accuracy > Speed. Delays between requests prevent rate limiting.
+One scan per day is sufficient — results must be reliable.
 """
 
 import re
@@ -299,12 +302,8 @@ def _search_ddg_lite(query: str) -> list:
 def _search_audit_web(name: str) -> dict:
     """
     Search for audit reports using DuckDuckGo Lite.
-    Skipped on Vercel (rate-limited from serverless IPs).
+    Runs on all environments. Uses 3s delay between queries to avoid rate limiting.
     """
-    is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_URL"))
-    if is_vercel:
-        return {"found": False}
-
     queries = [
         f'"{name}" audit',
     ]
@@ -313,7 +312,7 @@ def _search_audit_web(name: str) -> dict:
         results = _search_ddg_lite(query)
 
         if not results:
-            time.sleep(1)
+            time.sleep(3)
             continue
 
         # Combine all text from results
@@ -516,11 +515,11 @@ def check_audit(protocol: dict) -> dict:
     """
     Run multi-source audit check for a protocol.
 
-    Pipeline:
+    Pipeline (identical on all environments):
     1. DeFiLlama data
-    2. GitHub audit folders + README (LOCAL only, skipped on Vercel)
-    3. DuckDuckGo Lite search (works with rate limiting)
-    4. Website homepage PDF check (fallback)
+    2. GitHub audit folders + README
+    3. DuckDuckGo Lite search (with delays)
+    4. Website + docs subdomain check (fallback)
     """
     name = protocol.get("name") or "Unknown"
     audits = protocol.get("audits") or "0"
@@ -528,7 +527,6 @@ def check_audit(protocol: dict) -> dict:
     github_raw = protocol.get("github") or []
     website = protocol.get("url") or ""
 
-    is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_URL"))
 
     # Build GitHub URL
     if isinstance(github_raw, list) and github_raw:

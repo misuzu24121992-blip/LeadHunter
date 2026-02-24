@@ -192,31 +192,34 @@ def _check_github_audits(github_url: str) -> dict:
     else:
         return {"found": False}
 
-    # Scan repos in org
+    # Scan ONLY the most relevant repos in org (max 3 total checks)
     for endpoint in ["orgs", "users"]:
         try:
             url = f"https://api.github.com/{endpoint}/{org_name}/repos?per_page=30&sort=updated"
             resp = requests.get(url, headers=headers, timeout=8)
             if resp.status_code == 200:
                 repos = resp.json()
+                # Prioritize: audit/security repos first, then readme/docs
+                priority_repos = []
+                secondary_repos = []
                 for r in repos:
-                    rname = r.get("full_name", "")
-                    rdesc = (r.get("description") or "").lower()
                     rname_lower = r.get("name", "").lower()
-
-                    # Check repos with audit/security in name FIRST
                     if "audit" in rname_lower or "security" in rname_lower:
-                        folder_result = _check_repo_audit_folders(rname, headers)
-                        if folder_result.get("found"):
-                            return folder_result
+                        priority_repos.append(r)
+                    elif any(kw in rname_lower for kw in ["readme", "docs", "doc"]):
+                        secondary_repos.append(r)
 
-                    # Check README of main/readme/docs repos
-                    if any(kw in rname_lower for kw in ["readme", "docs", "doc", "contracts", "protocol"]):
-                        readme_result = _check_repo_readme(rname, headers)
-                        if readme_result.get("found"):
-                            return readme_result
-
-                    time.sleep(0.1)
+                # Check max 3 repos total
+                check_count = 0
+                for r in (priority_repos + secondary_repos)[:3]:
+                    rname = r.get("full_name", "")
+                    folder_result = _check_repo_audit_folders(rname, headers)
+                    if folder_result.get("found"):
+                        return folder_result
+                    readme_result = _check_repo_readme(rname, headers)
+                    if readme_result.get("found"):
+                        return readme_result
+                    check_count += 1
                 break
         except Exception:
             pass

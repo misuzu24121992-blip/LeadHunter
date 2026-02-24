@@ -25,79 +25,144 @@ import database as db
 # Lazy imports for scan functions
 _scan_lock = threading.Lock()
 
-def _heuristic_score(protocol: dict) -> dict:
-    """Simple heuristic scoring when AI is not available. Includes breakdown."""
+def _antigravity_score(protocol: dict) -> dict:
+    """
+    Antigravity auto-scoring using 6-dimension rubric.
+    Uses DeFiLlama data + audit enrichment for comprehensive scoring.
+    """
     tvl = protocol.get("tvl") or 0
     category = (protocol.get("category") or "").lower()
     name = protocol.get("name") or "Unknown"
     description = (protocol.get("description") or "").lower()
     change_7d = protocol.get("change_7d") or 0
+    audits = protocol.get("audits") or "0"
+    audit_links = protocol.get("audit_links") or []
+    forked_from = protocol.get("forked_from") or []
+    chains = protocol.get("chains") or []
 
-    # Build breakdown
     breakdown = {}
-    base = 30
-    breakdown["Base Score"] = {"points": base, "max": 30, "reason": "Starting baseline for all protocols"}
 
-    # TVL signals
-    tvl_pts = 0
+    # 1. Audit Need (max 25) — unaudited = high opportunity, audited = low
+    if audits != "0" and audit_links:
+        audit_pts = 3
+        audit_reason = f"Already audited ({len(audit_links)} report(s)) — low opportunity"
+    elif audits != "0":
+        audit_pts = 5
+        audit_reason = "DeFiLlama reports audit exists — moderate opportunity"
+    else:
+        # No audit — score based on TVL (higher TVL + no audit = bigger opportunity)
+        if tvl > 1_000_000:
+            audit_pts = 22
+            audit_reason = f"No audit found + high TVL (${tvl:,.0f}) — strong opportunity"
+        elif tvl > 100_000:
+            audit_pts = 18
+            audit_reason = f"No audit found + moderate TVL (${tvl:,.0f})"
+        elif tvl > 10_000:
+            audit_pts = 12
+            audit_reason = f"No audit found + low TVL (${tvl:,.0f})"
+        else:
+            audit_pts = 5
+            audit_reason = f"No audit but negligible TVL (${tvl:,.0f})"
+    breakdown["Audit Need"] = {"points": audit_pts, "max": 25, "reason": audit_reason}
+
+    # 2. Funding & Budget (max 15) — TVL as proxy for budget capacity
     if tvl > 50_000_000:
-        tvl_pts = 25
-        tvl_reason = f"Very high TVL (${tvl:,.0f})"
+        fund_pts = 14
+        fund_reason = f"Very high TVL (${tvl:,.0f}) — strong budget"
     elif tvl > 10_000_000:
-        tvl_pts = 20
-        tvl_reason = f"Strong TVL (${tvl:,.0f})"
+        fund_pts = 12
+        fund_reason = f"High TVL (${tvl:,.0f}) — good budget"
     elif tvl > 1_000_000:
-        tvl_pts = 15
-        tvl_reason = f"Moderate TVL (${tvl:,.0f})"
+        fund_pts = 9
+        fund_reason = f"Moderate TVL (${tvl:,.0f})"
     elif tvl > 100_000:
-        tvl_pts = 10
-        tvl_reason = f"Small TVL (${tvl:,.0f})"
+        fund_pts = 5
+        fund_reason = f"Small TVL (${tvl:,.0f})"
+    elif tvl > 10_000:
+        fund_pts = 3
+        fund_reason = f"Very small TVL (${tvl:,.0f})"
     else:
-        tvl_reason = f"Very low TVL (${tvl:,.0f})"
-    breakdown["TVL"] = {"points": tvl_pts, "max": 25, "reason": tvl_reason}
+        fund_pts = 1
+        fund_reason = f"Negligible TVL (${tvl:,.0f})"
+    breakdown["Funding & Budget"] = {"points": fund_pts, "max": 15, "reason": fund_reason}
 
-    # Category relevance
-    cat_pts = 0
-    high_value_cats = ["dexs", "lending", "bridge", "derivatives", "cdp", "yield", "liquid staking"]
-    mid_value_cats = ["defi", "staking", "rwa", "gaming", "nft"]
-    if any(c in category for c in high_value_cats):
-        cat_pts = 15
-        cat_reason = f"High-value category ({protocol.get('category')})"
-    elif any(c in category for c in mid_value_cats):
+    # 3. Category Fit (max 15) — Verichains service alignment
+    high_fit = ["bridge", "cross chain", "lending", "cdp", "derivatives", "liquid staking"]
+    good_fit = ["dexs", "yield", "yield aggregator", "staking pool", "rwa"]
+    mid_fit = ["staking", "gaming", "nft", "launchpad"]
+    if any(c in category for c in high_fit):
+        cat_pts = 14
+        cat_reason = f"High Verichains fit ({protocol.get('category')})"
+    elif any(c in category for c in good_fit):
         cat_pts = 10
-        cat_reason = f"Mid-value category ({protocol.get('category')})"
+        cat_reason = f"Good Verichains fit ({protocol.get('category')})"
+    elif any(c in category for c in mid_fit):
+        cat_pts = 6
+        cat_reason = f"Moderate fit ({protocol.get('category')})"
     else:
-        cat_reason = f"Low-value category ({protocol.get('category') or 'Other'})"
-    breakdown["Category Relevance"] = {"points": cat_pts, "max": 15, "reason": cat_reason}
+        cat_pts = 3
+        cat_reason = f"Low fit ({protocol.get('category') or 'Other'})"
+    breakdown["Category Fit"] = {"points": cat_pts, "max": 15, "reason": cat_reason}
 
-    # Smart contract signals
-    desc_pts = 0
-    if any(kw in description for kw in ["smart contract", "defi", "protocol", "vault", "pool", "swap"]):
-        desc_pts = 5
-        desc_reason = "Description contains smart contract keywords"
-    else:
-        desc_reason = "No smart contract keywords in description"
-    breakdown["Description Signals"] = {"points": desc_pts, "max": 5, "reason": desc_reason}
-
-    # Growing TVL
+    # 4. Growth & Timing (max 10)
     growth_pts = 0
-    if isinstance(change_7d, (int, float)) and change_7d > 50:
-        growth_pts = 10
+    if isinstance(change_7d, (int, float)) and change_7d > 100:
+        growth_pts = 9
+        growth_reason = f"Explosive growth ({change_7d:.1f}% in 7d)"
+    elif isinstance(change_7d, (int, float)) and change_7d > 30:
+        growth_pts = 7
         growth_reason = f"Strong growth ({change_7d:.1f}% in 7d)"
     elif isinstance(change_7d, (int, float)) and change_7d > 10:
         growth_pts = 5
         growth_reason = f"Moderate growth ({change_7d:.1f}% in 7d)"
+    elif isinstance(change_7d, (int, float)) and change_7d > 0:
+        growth_pts = 3
+        growth_reason = f"Slight growth ({change_7d:.1f}% in 7d)"
     else:
-        growth_reason = f"Low/negative growth ({change_7d:.1f}% in 7d)" if isinstance(change_7d, (int, float)) else "No growth data"
-    breakdown["7d Growth"] = {"points": growth_pts, "max": 10, "reason": growth_reason}
+        growth_pts = 1
+        growth_reason = f"Flat/declining ({change_7d:.1f}% in 7d)" if isinstance(change_7d, (int, float)) else "No growth data"
+    breakdown["Growth & Timing"] = {"points": growth_pts, "max": 10, "reason": growth_reason}
 
-    # Unknown factors (AI would fill these)
-    breakdown["Funding & Backers"] = {"points": 0, "max": 15, "reason": "Unknown — requires AI scoring"}
-    breakdown["Audit Status"] = {"points": 0, "max": 10, "reason": "Unknown — requires AI scoring"}
+    # 5. Verichains Moat (max 5) — ZK, crypto, cross-chain = specialty
+    moat_pts = 1
+    moat_reason = "Standard protocol"
+    moat_keywords = {"zk": 4, "zero knowledge": 4, "bridge": 3, "cross-chain": 3,
+                     "cryptography": 4, "mpc": 4, "threshold": 3, "rollup": 3}
+    for kw, pts in moat_keywords.items():
+        if kw in description or kw in " ".join(chains).lower():
+            moat_pts = max(moat_pts, pts)
+            moat_reason = f"Verichains specialty: {kw}"
+    breakdown["Verichains Moat"] = {"points": moat_pts, "max": 5, "reason": moat_reason}
 
-    score = min(base + tvl_pts + cat_pts + desc_pts + growth_pts, 100)
+    # 6. Base Score (max 30) — overall opportunity quality
+    base = 5  # Minimum
+    # Smart contract signals
+    sc_keywords = ["smart contract", "defi", "protocol", "vault", "pool", "swap",
+                   "staking", "lending", "liquidity", "amm", "erc-4626", "yield"]
+    sc_match = sum(1 for kw in sc_keywords if kw in description)
+    base += min(sc_match * 3, 12)  # Up to 12 pts from description
 
-    # Set priority
+    # Forked = lower originality but proven model
+    if forked_from:
+        base += 5
+        fork_note = f"Fork of {', '.join(forked_from[:2])} — proven model"
+    else:
+        base += 8
+        fork_note = "Original protocol"
+
+    # Multi-chain = more complex = more audit surface
+    if len(chains) > 2:
+        base += 3
+    elif len(chains) > 1:
+        base += 1
+
+    base = min(base, 30)
+    breakdown["Base Score"] = {"points": base, "max": 30, "reason": f"{fork_note}. SC keywords: {sc_match}"}
+
+    # Total score
+    score = min(audit_pts + fund_pts + cat_pts + growth_pts + moat_pts + base, 100)
+
+    # Priority classification
     if score >= 75:
         priority = "HOT"
     elif score >= 55:
@@ -107,14 +172,30 @@ def _heuristic_score(protocol: dict) -> dict:
     else:
         priority = "LOW"
 
-    # Build links from DeFiLlama data
+    # Build links
     slug = protocol.get("slug") or ""
     twitter = protocol.get("twitter") or ""
     github_list = protocol.get("github") or []
     github_url = github_list[0] if isinstance(github_list, list) and github_list else (github_list if isinstance(github_list, str) else "")
 
-    # Classify audit status from DeFiLlama data
+    # Audit status
     audit_status = _classify_audit(protocol)
+
+    # Smart pitch services
+    pitch = ["Smart Contract Audit"]
+    if any(kw in category for kw in ["bridge", "cross chain"]):
+        pitch.append("Cryptography Audit")
+    if "zk" in description or "rollup" in description:
+        pitch.append("Cryptography Audit (ZK)")
+    if tvl > 1_000_000:
+        pitch.append("Penetration Testing")
+
+    # Summary
+    desc_short = protocol.get("description") or "No description"
+    if audits != "0":
+        summary = f"{desc_short} TVL: ${tvl:,.0f}. {audit_status}"
+    else:
+        summary = f"{desc_short} TVL: ${tvl:,.0f}. No audit found — potential opportunity."
 
     return {
         "name": name,
@@ -122,14 +203,14 @@ def _heuristic_score(protocol: dict) -> dict:
         "score": score,
         "priority": priority,
         "source": "DeFiLlama",
-        "signals": [f"TVL: ${tvl:,.0f}", f"7d change: {change_7d:.1f}%"],
-        "summary": f"New protocol on DeFiLlama. {protocol.get('description') or 'No description.'}",
+        "signals": [f"TVL: ${tvl:,.0f}", f"7d: {change_7d:.1f}%"],
+        "summary": summary,
         "funding": f"TVL: ${tvl:,.0f}",
-        "tech": ", ".join((protocol.get("chains") or [])[:3]) or "Unknown chain",
+        "tech": ", ".join((chains)[:3]) or "Unknown chain",
         "audit_status": audit_status,
-        "pitch_services": ["Smart Contract Audit"],
+        "pitch_services": pitch,
         "score_breakdown": breakdown,
-        "scored_by": "heuristic",
+        "scored_by": "ai:antigravity",
         "lead_group": "A",
         "listed_at": protocol.get("listed_at") or "",
         "website_url": protocol.get("url") or "",
@@ -172,7 +253,7 @@ def _run_lead_scan():
         scored = []
         print(f"[Scan] Heuristic scoring {len(protocols)} protocols...")
         for protocol in protocols:
-            scored.append(_heuristic_score(protocol))
+            scored.append(_antigravity_score(protocol))
 
         hot = warm = pushed = 0
         existing_lower = [n.lower() for n in existing]

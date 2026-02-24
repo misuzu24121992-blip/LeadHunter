@@ -40,29 +40,41 @@ def _antigravity_score(protocol: dict) -> dict:
     forked_from = protocol.get("forked_from") or []
     chains = protocol.get("chains") or []
 
+    # Detect non-protocol tokens (RWA stocks, wrapped tokens)
+    non_protocol_keywords = ["stock", "tokenized stock", "equity", "share",
+                              "represents", "wrapped token", "synthetic stock"]
+    is_non_protocol = (category == "rwa" and
+                       any(kw in description for kw in non_protocol_keywords))
+
     breakdown = {}
 
-    # 1. Audit Need (max 25) — unaudited = high opportunity, audited = low
-    if audits != "0" and audit_links:
+    # 1. Audit Need (max 25)
+    # DeFiLlama audit data covers ~50% of protocols.
+    # audits="0" does NOT mean unaudited — only that DeFiLlama has no record.
+    if is_non_protocol:
+        audit_pts = 2
+        audit_reason = "Non-protocol token (RWA/stock) — audit not applicable"
+    elif audits != "0" and audit_links:
         audit_pts = 3
-        audit_reason = f"Already audited ({len(audit_links)} report(s)) — low opportunity"
+        audit_reason = f"Audited ({len(audit_links)} report(s) on DeFiLlama)"
     elif audits != "0":
         audit_pts = 5
-        audit_reason = "DeFiLlama reports audit exists — moderate opportunity"
+        audit_reason = "DeFiLlama reports audit exists"
     else:
-        # No audit — score based on TVL (higher TVL + no audit = bigger opportunity)
+        # DeFiLlama has no audit data — could be audited or not
+        # Use moderate score; manual /score-leads verification recommended
         if tvl > 1_000_000:
-            audit_pts = 22
-            audit_reason = f"No audit found + high TVL (${tvl:,.0f}) — strong opportunity"
+            audit_pts = 15
+            audit_reason = f"Audit unverified (DeFiLlama has no data). TVL ${tvl:,.0f} — needs manual check"
         elif tvl > 100_000:
-            audit_pts = 18
-            audit_reason = f"No audit found + moderate TVL (${tvl:,.0f})"
-        elif tvl > 10_000:
             audit_pts = 12
-            audit_reason = f"No audit found + low TVL (${tvl:,.0f})"
+            audit_reason = f"Audit unverified. TVL ${tvl:,.0f} — needs manual check"
+        elif tvl > 10_000:
+            audit_pts = 8
+            audit_reason = f"Audit unverified. TVL ${tvl:,.0f}"
         else:
-            audit_pts = 5
-            audit_reason = f"No audit but negligible TVL (${tvl:,.0f})"
+            audit_pts = 4
+            audit_reason = f"Audit unverified. Negligible TVL (${tvl:,.0f})"
     breakdown["Audit Need"] = {"points": audit_pts, "max": 25, "reason": audit_reason}
 
     # 2. Funding & Budget (max 15) — TVL as proxy for budget capacity
@@ -87,21 +99,25 @@ def _antigravity_score(protocol: dict) -> dict:
     breakdown["Funding & Budget"] = {"points": fund_pts, "max": 15, "reason": fund_reason}
 
     # 3. Category Fit (max 15) — Verichains service alignment
-    high_fit = ["bridge", "cross chain", "lending", "cdp", "derivatives", "liquid staking"]
-    good_fit = ["dexs", "yield", "yield aggregator", "staking pool", "rwa"]
-    mid_fit = ["staking", "gaming", "nft", "launchpad"]
-    if any(c in category for c in high_fit):
-        cat_pts = 14
-        cat_reason = f"High Verichains fit ({protocol.get('category')})"
-    elif any(c in category for c in good_fit):
-        cat_pts = 10
-        cat_reason = f"Good Verichains fit ({protocol.get('category')})"
-    elif any(c in category for c in mid_fit):
-        cat_pts = 6
-        cat_reason = f"Moderate fit ({protocol.get('category')})"
+    if is_non_protocol:
+        cat_pts = 1
+        cat_reason = f"Non-protocol token ({protocol.get('category')}) — not a smart contract target"
     else:
-        cat_pts = 3
-        cat_reason = f"Low fit ({protocol.get('category') or 'Other'})"
+        high_fit = ["bridge", "cross chain", "lending", "cdp", "derivatives", "liquid staking"]
+        good_fit = ["dexs", "yield", "yield aggregator", "staking pool", "rwa"]
+        mid_fit = ["staking", "gaming", "nft", "launchpad"]
+        if any(c in category for c in high_fit):
+            cat_pts = 14
+            cat_reason = f"High Verichains fit ({protocol.get('category')})"
+        elif any(c in category for c in good_fit):
+            cat_pts = 10
+            cat_reason = f"Good Verichains fit ({protocol.get('category')})"
+        elif any(c in category for c in mid_fit):
+            cat_pts = 6
+            cat_reason = f"Moderate fit ({protocol.get('category')})"
+        else:
+            cat_pts = 3
+            cat_reason = f"Low fit ({protocol.get('category') or 'Other'})"
     breakdown["Category Fit"] = {"points": cat_pts, "max": 15, "reason": cat_reason}
 
     # 4. Growth & Timing (max 10)
@@ -192,10 +208,12 @@ def _antigravity_score(protocol: dict) -> dict:
 
     # Summary
     desc_short = protocol.get("description") or "No description"
-    if audits != "0":
+    if is_non_protocol:
+        summary = f"{desc_short} TVL: ${tvl:,.0f}. Non-protocol RWA token — audit N/A."
+    elif audits != "0":
         summary = f"{desc_short} TVL: ${tvl:,.0f}. {audit_status}"
     else:
-        summary = f"{desc_short} TVL: ${tvl:,.0f}. No audit found — potential opportunity."
+        summary = f"{desc_short} TVL: ${tvl:,.0f}. Audit status unverified — needs manual check."
 
     return {
         "name": name,
@@ -227,11 +245,11 @@ def _classify_audit(protocol: dict) -> str:
 
     if audits != "0" and audit_links:
         links_str = ", ".join(audit_links[:3])
-        return f"✅ DeFiLlama reports {len(audit_links)} audit(s): {links_str}"
+        return f"✅ Audited — {len(audit_links)} report(s): {links_str}"
     elif audits != "0":
         return "✅ DeFiLlama reports audit exists (no links available)"
     else:
-        return "Unknown — needs review"
+        return "⚠️ Unverified — DeFiLlama has no audit data. Run /score-leads for manual check."
 
 
 

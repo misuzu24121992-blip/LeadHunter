@@ -280,7 +280,7 @@ def _run_lead_scan():
             protocol["_audit_result"] = audit_result
             # Delay between protocols to avoid rate limiting (accuracy > speed)
             if i < len(protocols) - 1:
-                time.sleep(3)
+                time.sleep(20)
 
         # Antigravity scoring using audit results
         scored = []
@@ -631,7 +631,7 @@ def _run_rescore():
 
             # Delay between protocols to avoid rate limiting (accuracy > speed)
             if updated < len(leads):
-                time.sleep(3)
+                time.sleep(20)
 
         result = {"updated": updated, "total": len(leads)}
         import json as _json

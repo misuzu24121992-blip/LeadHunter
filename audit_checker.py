@@ -312,7 +312,7 @@ def _search_audit_web(name: str) -> dict:
         results = _search_ddg_lite(query)
 
         if not results:
-            time.sleep(3)
+            time.sleep(20)
             continue
 
         # Combine all text from results

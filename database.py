@@ -537,7 +537,9 @@ def get_incidents(limit: int = 50) -> list[dict]:
 
 def start_scan_log(scan_type: str) -> int:
     conn = get_conn()
-    cursor = conn.execute("INSERT INTO scan_logs (scan_type) VALUES (?)", (scan_type,))
+    cursor = conn.execute(
+        "INSERT INTO scan_logs (scan_type, started_at) VALUES (?, datetime('now','localtime'))",
+        (scan_type,))
     conn.commit()
     return cursor.lastrowid
 

@@ -624,7 +624,7 @@ def _run_rescore():
                 "score_breakdown": json.dumps(scored.get("score_breakdown", {})),
                 "scored_by": "ai:antigravity",
                 "summary": scored["summary"],
-                "pitch_services": json.dumps(scored.get("pitch_services", [])),
+                "pitch_services": ", ".join(scored.get("pitch_services", [])),
             })
             updated += 1
             print(f"  [{updated}/{len(leads)}] {name}: {scored['score']}pts ({scored['priority']}) — {scored['audit_status'][:60]}")

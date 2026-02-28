@@ -236,8 +236,8 @@ def init_tables(conn: sqlite3.Connection):
             defillama_url TEXT DEFAULT '',
             contact_notes TEXT DEFAULT '',
             follow_up_date TEXT DEFAULT '',
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now'))
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
         );
 
         CREATE TABLE IF NOT EXISTS watchlist (
@@ -252,7 +252,7 @@ def init_tables(conn: sqlite3.Connection):
             client_type TEXT DEFAULT '',
             proxy_contracts TEXT DEFAULT '{}',
             notes TEXT DEFAULT '',
-            created_at TEXT DEFAULT (datetime('now'))
+            created_at TEXT DEFAULT (datetime('now','localtime'))
         );
 
         CREATE TABLE IF NOT EXISTS incidents (
@@ -267,7 +267,7 @@ def init_tables(conn: sqlite3.Connection):
             targets TEXT DEFAULT '[]',
             source TEXT DEFAULT '',
             link TEXT DEFAULT '',
-            created_at TEXT DEFAULT (datetime('now'))
+            created_at TEXT DEFAULT (datetime('now','localtime'))
         );
 
         CREATE TABLE IF NOT EXISTS scan_logs (
@@ -278,7 +278,7 @@ def init_tables(conn: sqlite3.Connection):
             hot_count INTEGER DEFAULT 0,
             warm_count INTEGER DEFAULT 0,
             details TEXT DEFAULT '',
-            started_at TEXT DEFAULT (datetime('now')),
+            started_at TEXT DEFAULT (datetime('now','localtime')),
             completed_at TEXT
         );
 
@@ -403,7 +403,7 @@ def update_lead(lead_id: int, updates: dict) -> bool:
     if not fields:
         return False
 
-    fields.append("updated_at = datetime('now')")
+    fields.append("updated_at = datetime('now','localtime')")
     params.append(lead_id)
     conn.execute(f"UPDATE leads SET {', '.join(fields)} WHERE id = ?", params)
     conn.commit()
@@ -546,7 +546,7 @@ def complete_scan_log(log_id: int, leads_found: int = 0, hot: int = 0, warm: int
     conn = get_conn()
     conn.execute("""
         UPDATE scan_logs SET status='completed', leads_found=?, hot_count=?,
-               warm_count=?, details=?, completed_at=datetime('now')
+               warm_count=?, details=?, completed_at=datetime('now','localtime')
         WHERE id = ?
     """, (leads_found, hot, warm, details, log_id))
     conn.commit()
@@ -555,7 +555,7 @@ def complete_scan_log(log_id: int, leads_found: int = 0, hot: int = 0, warm: int
 def fail_scan_log(log_id: int, error: str):
     conn = get_conn()
     conn.execute("""
-        UPDATE scan_logs SET status='failed', details=?, completed_at=datetime('now')
+        UPDATE scan_logs SET status='failed', details=?, completed_at=datetime('now','localtime')
         WHERE id = ?
     """, (error, log_id))
     conn.commit()

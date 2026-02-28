@@ -693,5 +693,15 @@ async def reset_db():
 
 if __name__ == "__main__":
     print("🚀 Verichains LeadHunter — Starting web server...")
+    # Auto-cleanup stuck scans from previous server crash
+    try:
+        conn = db.get_conn()
+        stuck = conn.execute("UPDATE scan_logs SET status='failed', details='Server restarted' WHERE status='running'")
+        conn.commit()
+        if stuck.rowcount > 0:
+            print(f"🧹 Cleaned {stuck.rowcount} stuck scan(s) from previous session")
+    except Exception:
+        pass
     print("📊 Dashboard: http://localhost:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
